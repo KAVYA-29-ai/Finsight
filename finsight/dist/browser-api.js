@@ -4,7 +4,9 @@ const receiptParseCache = new Map();
 function sanitizeConfigValue(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.includes('%VITE_')) return '';
-  return raw.replace(/\/$/, '');
+  return raw
+    .replace(/^['\"]|['\"]$/g, '')
+    .replace(/\/$/, '');
 }
 
 function toMoney(value) {
@@ -96,10 +98,17 @@ function computePlatformFee(askingPrice) {
 
 function getSupabaseConfig() {
   const url = sanitizeConfigValue(runtimeConfig.SUPABASE_URL);
-  const anonKey = String(runtimeConfig.SUPABASE_ANON_KEY || '').trim();
+  const anonKey = String(runtimeConfig.SUPABASE_ANON_KEY || '').trim().replace(/^['\"]|['\"]$/g, '');
   if (!url || !anonKey) {
     throw new Error('Supabase env is missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
   }
+
+  try {
+    new URL(url);
+  } catch {
+    throw new Error('Invalid SUPABASE URL. In Vercel, set VITE_SUPABASE_URL without quotes.');
+  }
+
   return { url, anonKey };
 }
 

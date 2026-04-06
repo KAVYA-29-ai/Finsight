@@ -3,7 +3,10 @@ function getAppConfig() {
 }
 
 function normalizeUrl(value) {
-  return String(value || '').trim().replace(/\/$/, '');
+  return String(value || '')
+    .trim()
+    .replace(/^['\"]|['\"]$/g, '')
+    .replace(/\/$/, '');
 }
 
 function toInt(value) {
@@ -36,10 +39,16 @@ function dateKeyFromMs(ms) {
 function getSupabaseConfig() {
   const config = getAppConfig();
   const url = normalizeUrl(config.SUPABASE_URL);
-  const anonKey = String(config.SUPABASE_ANON_KEY || '').trim();
+  const anonKey = String(config.SUPABASE_ANON_KEY || '').trim().replace(/^['\"]|['\"]$/g, '');
 
   if (!url || !anonKey) {
     throw new Error('Supabase env is missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.');
+  }
+
+  try {
+    new URL(url);
+  } catch {
+    throw new Error('Invalid SUPABASE URL. In Vercel, set VITE_SUPABASE_URL without quotes.');
   }
 
   return { url, anonKey };
