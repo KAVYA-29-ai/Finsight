@@ -1,12 +1,19 @@
 {
-  "name": "finsight2-phonepe-local",
+  "name": "finsight2-monorepo",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "phonepe",
+    "finsight"
+  ],
   "scripts": {
-    "start": "node phonepe/server.js",
-    "dev": "node phonepe/server.js"
+    "dev": "concurrently \"npm run dev -w phonepe\" \"npm run dev -w finsight\"",
+    "dev:phonepe": "npm run dev -w phonepe",
+    "dev:finsight": "npm run dev -w finsight",
+    "finsight": "npm run dev:finsight",
+    "build": "npm run build -w phonepe && npm run build -w finsight"
   },
-  "engines": {
-    "node": ">=24"
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

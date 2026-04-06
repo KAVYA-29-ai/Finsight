@@ -18,11 +18,20 @@ const ui = {
 let state = null;
 let isLoading = false;
 
+/**
+ * Updates the top status banner with the latest app message.
+ * @param {string} message - Text to show in the banner.
+ * @param {'info'|'success'|'error'} tone - Visual tone for the message.
+ */
 function setStatus(message, tone = 'info') {
   statusEl.textContent = message;
   statusEl.dataset.tone = tone;
 }
 
+/**
+ * Returns the active screen markup based on the current UI state.
+ * @returns {string} Rendered HTML for the visible PhonePe screen.
+ */
 function screenMarkup() {
   switch (ui.view) {
     case 'pay':
@@ -39,6 +48,10 @@ function screenMarkup() {
   }
 }
 
+/**
+ * Builds the bottom navigation bar for the PhonePe shell.
+ * @returns {string} HTML string for the bottom nav.
+ */
 function navMarkup() {
   const tabs = [
     ['home', 'Home'],
@@ -56,6 +69,10 @@ function navMarkup() {
   `;
 }
 
+/**
+ * Wraps the active screen and navigation into the main app layout.
+ * @returns {string} Full rendered layout HTML.
+ */
 function layoutMarkup() {
   return `
     <div class="app-shell">
@@ -67,15 +84,29 @@ function layoutMarkup() {
   `;
 }
 
+/**
+ * Renders the full app into the root container.
+ */
 function render() {
   if (!state) {
     appEl.innerHTML = '<div class="loading card">Loading local PhonePe data...</div>';
     return;
   }
 
+  if (ui.view === 'paymentDone') {
+    statusEl.style.display = 'none';
+  } else {
+    statusEl.style.display = '';
+  }
+
   appEl.innerHTML = layoutMarkup();
 }
 
+/**
+ * Loads fresh data from the local API and updates the visible UI.
+ * @param {string} [message='Synced with local SQLite .db'] - Sync message for the status banner.
+ * @returns {Promise<void>}
+ */
 async function refreshData(message = 'Synced with local SQLite .db') {
   if (isLoading) {
     return;
@@ -95,6 +126,11 @@ async function refreshData(message = 'Synced with local SQLite .db') {
   }
 }
 
+/**
+ * Adds money to the local wallet and refreshes the screen.
+ * @param {HTMLFormElement} form - Top-up form element.
+ * @returns {Promise<void>}
+ */
 async function handleTopUp(form) {
   const amount = form.amount.value;
   const nextState = await api.addMoney(amount);
@@ -103,6 +139,11 @@ async function handleTopUp(form) {
   setStatus(`Wallet topped up by ₹${Number(amount).toLocaleString('en-IN')}`, 'success');
 }
 
+/**
+ * Saves a payment transaction and shows the payment-done screen.
+ * @param {HTMLFormElement} form - Payment form element.
+ * @returns {Promise<void>}
+ */
 async function handlePayment(form) {
   const payload = {
     name: form.name.value,
@@ -118,9 +159,13 @@ async function handlePayment(form) {
   };
   ui.view = 'paymentDone';
   render();
-  setStatus(`Payment saved for ${payload.name}`, 'success');
 }
 
+/**
+ * Creates a new EMI entry in the local database.
+ * @param {HTMLFormElement} form - EMI form element.
+ * @returns {Promise<void>}
+ */
 async function handleEmi(form) {
   const payload = {
     name: form.name.value,
@@ -155,6 +200,25 @@ document.addEventListener('click', async (event) => {
     ui.view = 'home';
     ui.paymentResult = null;
     render();
+    return;
+  }
+
+  const clearSearchButton = event.target.closest('[data-clear-search]');
+  if (clearSearchButton) {
+    ui.search = '';
+    const historyInput = document.querySelector('#history-search');
+    if (historyInput instanceof HTMLInputElement) {
+      historyInput.value = '';
+      historyInput.focus();
+    }
+
+    const historyList = document.querySelector('[data-history-list]');
+    const historyCount = document.querySelector('[data-history-count]');
+    if (historyList && historyCount) {
+      const nextHistory = renderHistoryTransactions(state, ui.search);
+      historyList.innerHTML = nextHistory.markup;
+      historyCount.textContent = nextHistory.countText;
+    }
     return;
   }
 

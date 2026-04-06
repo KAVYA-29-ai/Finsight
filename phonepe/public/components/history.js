@@ -11,6 +11,12 @@ function matchesSearch(transaction, search) {
     .some((value) => String(value).toLowerCase().includes(needle));
 }
 
+  /**
+   * Renders the History screen with the current transactions and search text.
+   * @param {object} state - App state from the local API.
+   * @param {object} ui - Current UI state including search text.
+   * @returns {string} HTML for the History screen.
+   */
 export function renderHistory(state, ui) {
   const transactions = state?.transactions || [];
   const search = ui.search || '';
@@ -46,7 +52,10 @@ export function renderHistory(state, ui) {
 
       <label class="search-box card">
         <span>Search</span>
-        <input id="history-search" type="search" placeholder="Search name, type, or GST" value="${escapeHtml(search)}" />
+        <div class="search-field-wrap">
+          <input id="history-search" type="text" autocomplete="off" spellcheck="false" placeholder="Search name, type, or GST" value="${escapeHtml(search)}" />
+          <button type="button" class="search-clear" data-clear-search aria-label="Clear search">×</button>
+        </div>
       </label>
 
       <div class="transaction-list history-list" data-history-list>
@@ -56,6 +65,12 @@ export function renderHistory(state, ui) {
   `;
 }
 
+/**
+ * Rebuilds only the History list area so typing does not rerender the whole page.
+ * @param {object} state - App state from the local API.
+ * @param {string} search - Current search query.
+ * @returns {{countText: string, markup: string}} Search count and filtered transaction markup.
+ */
 export function renderHistoryTransactions(state, search) {
   const transactions = state?.transactions || [];
   const filteredTransactions = transactions.filter((transaction) => matchesSearch(transaction, search || ''));

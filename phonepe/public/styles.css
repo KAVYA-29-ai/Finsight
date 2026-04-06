@@ -426,6 +426,40 @@ select option {
   gap: 10px;
 }
 
+.search-field-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.search-field-wrap input {
+  display: block;
+  padding-right: 44px;
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  opacity: 0.9;
+  z-index: 2;
+  padding: 0;
+}
+
+.search-clear:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .search-box span,
 .form-card span {
   display: block;

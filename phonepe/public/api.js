@@ -33,10 +33,33 @@ export const api = {
     });
     return payload.data;
   },
+  async createReceipt(data) {
+    const payload = await requestJson('/api/receipts', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    return payload.data;
+  },
   async createEmi(data) {
     const payload = await requestJson('/api/emis', {
       method: 'POST',
       body: JSON.stringify(data)
+    });
+    return payload.data;
+  },
+  async getReport() {
+    const payload = await requestJson('/api/report');
+    return payload.data;
+  },
+  async resetData() {
+    const payload = await requestJson('/api/admin/reset', {
+      method: 'POST'
+    });
+    return payload.data;
+  },
+  async reseedData() {
+    const payload = await requestJson('/api/admin/reseed', {
+      method: 'POST'
     });
     return payload.data;
   }
