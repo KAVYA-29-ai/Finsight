@@ -1,5 +1,17 @@
+function sanitizeConfigValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.includes('%VITE_')) return '';
+  return raw.replace(/\/$/, '');
+}
+
+const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || {}) : {};
+
+// Runtime API base URL injected from index.html; empty means same-origin (/api) for local proxy.
+const API_BASE = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.PHONEPE_API_URL) || '';
+
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+  const response = await fetch(fullUrl, {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
@@ -7,7 +19,17 @@ async function requestJson(url, options = {}) {
     ...options
   });
 
-  const payload = await response.json();
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    const hint = API_BASE
+      ? `API returned non-JSON response from ${API_BASE}. Check API deployment and URL.`
+      : 'API returned non-JSON response. For deployment, set VITE_PHONEPE_API_URL in Vercel.';
+    throw new Error(hint);
+  }
+
   if (!response.ok || payload.ok === false) {
     throw new Error(payload.error || 'Request failed');
   }
