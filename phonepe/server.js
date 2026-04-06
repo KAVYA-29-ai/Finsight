@@ -2,11 +2,14 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import 'dotenv/config';
 import { addMoney, clearDemoData, createEmi, getState, reseedDemoData, storeReceipt, storeTransaction } from './db.js';
+import { mergeSharedState, readCommonDataSnapshot, readSharedLedger, readSharedState } from '../shared/common-sqlite.js';
+import { getSupabaseHealthSnapshot } from '../shared/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PHONEPE_PORT || process.env.PORT || 3000);
 
 const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -40,6 +43,18 @@ function sendJson(res, statusCode, payload) {
 function sendText(res, statusCode, text, contentType = 'text/plain; charset=utf-8') {
   res.writeHead(statusCode, { 'Content-Type': contentType });
   res.end(text);
+}
+
+function syncCommonStateFromPhonePe() {
+  const state = getState();
+  return mergeSharedState(
+    {
+      walletBalance: Number(state.wallet?.balance || 0),
+      lastPhonepeTransactionCount: Number((state.transactions || []).length),
+      lastPhonepeSyncAt: Date.now()
+    },
+    'phonepe'
+  );
 }
 
 /**
@@ -93,10 +108,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/common/state') {
+    sendJson(res, 200, { ok: true, data: readSharedState() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/common/ledger') {
+    sendJson(res, 200, { ok: true, data: readSharedLedger() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/common/data') {
+    sendJson(res, 200, { ok: true, data: readCommonDataSnapshot() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/supabase/health') {
+    const data = await getSupabaseHealthSnapshot();
+    sendJson(res, 200, { ok: true, data });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/common/state') {
+    try {
+      const body = await readBody(req);
+      const patch = body && typeof body.patch === 'object' && body.patch ? body.patch : {};
+      const data = mergeSharedState(patch, body.updatedBy || 'phonepe');
+      sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error.message });
+    }
+    return;
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/wallet/add') {
     try {
       const body = await readBody(req);
       const wallet = addMoney(body.amount);
+      syncCommonStateFromPhonePe();
       sendJson(res, 200, { ok: true, wallet, data: getState() });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
@@ -108,6 +157,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const transaction = storeTransaction(body, true);
+      syncCommonStateFromPhonePe();
       sendJson(res, 200, { ok: true, transaction, data: getState() });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
@@ -119,6 +169,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const receipt = storeReceipt(body);
+      syncCommonStateFromPhonePe();
       sendJson(res, 200, { ok: true, receipt, data: getState() });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
@@ -130,6 +181,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const emi = createEmi(body);
+      syncCommonStateFromPhonePe();
       sendJson(res, 200, { ok: true, emi, data: getState() });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
@@ -145,12 +197,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/admin/reset') {
     const state = clearDemoData();
+    syncCommonStateFromPhonePe();
     sendJson(res, 200, { ok: true, data: state });
     return;
   }
 
   if (req.method === 'POST' && url.pathname === '/api/admin/reseed') {
     const state = reseedDemoData();
+    syncCommonStateFromPhonePe();
     sendJson(res, 200, { ok: true, data: state });
     return;
   }
@@ -164,5 +218,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
+  syncCommonStateFromPhonePe();
   console.log(`PhonePe local app running at http://localhost:${port}`);
 });

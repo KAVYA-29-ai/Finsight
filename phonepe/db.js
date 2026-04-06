@@ -1,10 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import 'dotenv/config';
 import { buildDashboardInsights } from './dinsight/report.js';
+import { recordEmiHistory, recordMoneyTransaction, recordReceiptHistory, recordWalletEvent } from '../shared/common-sqlite.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.join(__dirname, 'phonepe.db');
+const dbPath = process.env.PHONEPE_DB_PATH || path.join(__dirname, 'phonepe.db');
 const db = new DatabaseSync(dbPath);
 
 export const CATEGORIES = ['Food', 'Transport', 'Shopping', 'Entertainment', 'Health', 'Education', 'Utilities', 'Others'];
@@ -302,7 +304,9 @@ function storeTransaction(transaction, affectWallet = true) {
     if (wallet.balance < amount) {
       throw new Error('Wallet balance is too low for this payment.');
     }
+    const nextBalance = wallet.balance - amount;
     db.prepare('UPDATE wallet SET balance = balance - ?, updatedAt = ? WHERE id = 1').run(amount, now());
+    recordWalletEvent({ source: 'phonepe', eventType: 'debit', amount: -amount, balance: nextBalance, note: `Payment to ${name}` });
   }
 
   const inserted = db.prepare('INSERT INTO transactions (name, amount, category, type, needOrWant, gst, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
@@ -315,7 +319,19 @@ function storeTransaction(transaction, affectWallet = true) {
     now()
   );
 
-  return db.prepare('SELECT id, name, amount, category, type, needOrWant, gst, timestamp FROM transactions WHERE id = ?').get(inserted.lastInsertRowid);
+  const savedTransaction = db.prepare('SELECT id, name, amount, category, type, needOrWant, gst, timestamp FROM transactions WHERE id = ?').get(inserted.lastInsertRowid);
+  recordMoneyTransaction({
+    source: 'phonepe',
+    kind: 'payment',
+    name: savedTransaction.name,
+    amount: savedTransaction.amount,
+    category: savedTransaction.category,
+    type: savedTransaction.type,
+    needOrWant: savedTransaction.needOrWant,
+    gst: savedTransaction.gst,
+    note: 'PhonePe transaction'
+  });
+  return savedTransaction;
 }
 
 /**
@@ -329,7 +345,9 @@ function addMoney(amount) {
     throw new Error('Top up amount must be positive.');
   }
   db.prepare('UPDATE wallet SET balance = balance + ?, updatedAt = ? WHERE id = 1').run(parsedAmount, now());
-  return getWalletRow();
+  const wallet = getWalletRow();
+  recordWalletEvent({ source: 'phonepe', eventType: 'credit', amount: parsedAmount, balance: wallet.balance, note: 'Wallet top up' });
+  return wallet;
 }
 
 /**
@@ -354,7 +372,9 @@ function createEmi(emi) {
   }
 
   const inserted = db.prepare('INSERT INTO emis (name, amount, dueDate) VALUES (?, ?, ?)').run(name, amount, dueDate);
-  return db.prepare('SELECT id, name, amount, dueDate FROM emis WHERE id = ?').get(inserted.lastInsertRowid);
+  const savedEmi = db.prepare('SELECT id, name, amount, dueDate FROM emis WHERE id = ?').get(inserted.lastInsertRowid);
+  recordEmiHistory({ source: 'phonepe', name: savedEmi.name, amount: savedEmi.amount, dueDate: savedEmi.dueDate });
+  return savedEmi;
 }
 
 /**
@@ -394,7 +414,18 @@ function storeReceipt(receipt) {
     now()
   );
 
-  return db.prepare('SELECT id, merchant, amount, category, note, source, fileName, fileType, timestamp FROM receipts WHERE id = ?').get(inserted.lastInsertRowid);
+  const savedReceipt = db.prepare('SELECT id, merchant, amount, category, note, source, fileName, fileType, timestamp FROM receipts WHERE id = ?').get(inserted.lastInsertRowid);
+  recordReceiptHistory({
+    source: 'phonepe',
+    merchant: savedReceipt.merchant,
+    amount: savedReceipt.amount,
+    category: savedReceipt.category,
+    note: savedReceipt.note,
+    entrySource: savedReceipt.source,
+    fileName: savedReceipt.fileName,
+    fileType: savedReceipt.fileType
+  });
+  return savedReceipt;
 }
 
 /**

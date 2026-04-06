@@ -8,9 +8,7 @@ const state = {
   detailedReport: null
 };
 
-const apiBase = window.location.port === '3001'
-  ? ''
-  : `${window.location.protocol}//${window.location.hostname}:3001`;
+const apiBase = '';
 
 function apiUrl(path) {
   if (!path.startsWith('/')) return path;
@@ -248,6 +246,45 @@ function renderInsights() {
       <span>${alert.message}</span>
     </div>
   `).join('');
+
+  const criticalPoints = (state.insights.critical_points || []).slice(0, 4);
+  if (criticalPoints.length) {
+    futureAlertsHost.innerHTML += `
+      <div class="future-alert critical">
+        <div class="future-alert-head">
+          <span class="pill">Critical Points</span>
+          <strong>Spending Analysis</strong>
+        </div>
+        <ul>${criticalPoints.map((point) => `<li>${point}</li>`).join('')}</ul>
+      </div>
+    `;
+  }
+
+  const opportunities = (state.insights.future_opportunities || []).slice(0, 3);
+  if (opportunities.length) {
+    futureAlertsHost.innerHTML += `
+      <div class="future-alert medium">
+        <div class="future-alert-head">
+          <span class="pill">Future</span>
+          <strong>Opportunities</strong>
+        </div>
+        <ul>${opportunities.map((item) => `<li>${item}</li>`).join('')}</ul>
+      </div>
+    `;
+  }
+
+  if (state.insights.investment_suggestion) {
+    futureAlertsHost.innerHTML += `
+      <div class="future-alert low">
+        <div class="future-alert-head">
+          <span class="pill">Invest</span>
+          <strong>Suggested Move</strong>
+        </div>
+        <span>${state.insights.investment_suggestion}</span>
+      </div>
+    `;
+  }
+
   health.textContent = `Health: ${state.insights.health_score || 0}`;
   needs.textContent = `${needsShare}%`;
   wants.textContent = `${wantsShare}%`;

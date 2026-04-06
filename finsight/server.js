@@ -3,11 +3,14 @@ import fs from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import 'dotenv/config';
+import { mergeSharedState, readCommonDataSnapshot, readSharedLedger, readSharedState, recordBudget, recordMarketplaceListing } from '../shared/common-sqlite.js';
+import { getSupabaseHealthSnapshot } from '../shared/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
-const marketplaceDbPath = path.join(__dirname, 'finsight.db');
-const port = Number(process.env.PORT || 3001);
+const marketplaceDbPath = process.env.FINSIGHT_SQLITE_PATH || path.join(__dirname, 'finsight.db');
+const port = Number(process.env.FINSIGHT_PORT || process.env.PORT || 3001);
 const envPath = path.join(__dirname, '.env');
 const rootEnvPath = path.join(__dirname, '..', '.env');
 const marketplaceDb = new DatabaseSync(marketplaceDbPath);
@@ -60,7 +63,34 @@ function initializeMarketplaceSchema() {
       status TEXT NOT NULL DEFAULT 'active',
       timestamp INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
   `);
+}
+
+function getSetting(key) {
+  const row = marketplaceDb.prepare('SELECT value FROM app_settings WHERE key = ?').get(String(key));
+  return row ? String(row.value) : null;
+}
+
+function setSetting(key, value) {
+  marketplaceDb
+    .prepare(
+      'INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt'
+    )
+    .run(String(key), String(value), Date.now());
+}
+
+function loadMonthlyBudgetFromDb(defaultBudget) {
+  const dbValue = Number(getSetting('monthly_budget'));
+  if (Number.isFinite(dbValue) && dbValue > 0) {
+    return dbValue;
+  }
+  setSetting('monthly_budget', defaultBudget);
+  return defaultBudget;
 }
 
 function insertMarketplaceListing({ type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry }) {
@@ -88,6 +118,8 @@ function insertMarketplaceListing({ type, brand, originalValue, askingPrice, pla
     status: String(row.status || 'active'),
     timestamp: Number(row.timestamp || Date.now())
   };
+
+  return snapshot;
 }
 
 function listActiveMarketplaceListings() {
@@ -161,6 +193,16 @@ async function readJsonBody(req) {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+function syncCommonStateFromFinSight() {
+  return mergeSharedState(
+    {
+      monthlyBudget: toRupeeNumber(monthlyBudget),
+      lastFinsightSyncAt: Date.now()
+    },
+    'finsight'
+  );
 }
 
 function guessMerchantFromFilename(filename) {
@@ -396,7 +438,7 @@ async function buildGeminiInsightsPayload(input) {
   const prompt = [
     'You are a friendly financial coach for Indian users. Your goal is to provide actionable, personalized, and encouraging advice. Return only JSON.',
     'The user lives in India, so use rupees (₹) and Indian finance context.',
-    'Your response must follow this exact JSON format: {"tips": ["string", ...], "future_alerts": [{"priority": "Low|Medium|High|Critical", "title": "string", "message": "string"}, ...], "warning": "string|null", "need_want_insight": "string"}',
+    'Your response must follow this exact JSON format: {"tips": ["string", ...], "future_alerts": [{"priority": "Low|Medium|High|Critical", "title": "string", "message": "string"}, ...], "warning": "string|null", "need_want_insight": "string", "critical_points": ["string", ...], "investment_suggestion": "string", "future_opportunities": ["string", ...]}',
     '---',
     'USER\'S FINANCIAL SNAPSHOT:',
     `Monthly total spent: ₹${input.monthlySpent}`,
@@ -406,11 +448,16 @@ async function buildGeminiInsightsPayload(input) {
     `Budget remaining: ₹${input.budgetLeft}`,
     `Current financial health score: ${input.healthScore}/100`,
     `Predicted spend for next month: ₹${input.forecast?.predicted || 0}`,
+    `Today date: ${input.todayDate || new Date().toISOString().slice(0, 10)}`,
+    `Upcoming India events likely to increase spend: ${(input.upcomingEvents || []).join(' | ') || 'None in next weeks'}`,
     '---',
     'YOUR TASK:',
     '1.  **Tips**: Provide 4 short, practical, and encouraging tips. The tips should be directly related to the user\'s snapshot. For example, if "Wants" spending is high, suggest a specific way to manage it.',
     '2.  **Future Alerts**: Identify 3 potential future financial problems based on the data. Assign a "priority" (Low, Medium, High, Critical). The "title" should be a concise summary of the risk. The "message" should explain the risk and suggest a clear, single action to mitigate it.',
     '3.  **Warning**: If the user is on track to exceed their budget, provide a brief, non-alarming warning message. Otherwise, this should be null.',
+    '4.  **Critical Points**: Provide 2-3 bullet points identifying the most critical issues in current spend behavior.',
+    '5.  **Investment Suggestion**: Give one very practical Indian context suggestion (for example liquid fund, RD, debt MF SIP, index fund SIP) based on affordability.',
+    '6.  **Future Opportunities**: Provide 2 short opportunities (e.g., where to cut waste and where to redirect money).',
     '---',
     'RULES:',
     '- Be encouraging and not judgmental.',
@@ -435,7 +482,14 @@ async function buildGeminiInsightsPayload(input) {
             .slice(0, 4)
         : [],
       warning: String(ai?.warning || '').trim() || null,
-      need_want_insight: String(ai?.need_want_insight || '').trim() || null
+      need_want_insight: String(ai?.need_want_insight || '').trim() || null,
+      critical_points: Array.isArray(ai?.critical_points)
+        ? ai.critical_points.map((point) => String(point || '').trim()).filter(Boolean).slice(0, 4)
+        : [],
+      investment_suggestion: String(ai?.investment_suggestion || '').trim() || null,
+      future_opportunities: Array.isArray(ai?.future_opportunities)
+        ? ai.future_opportunities.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+        : []
     };
 
     geminiCache.insights = { key: payloadKey, at: nowMs, data: normalized };
@@ -595,6 +649,48 @@ function lastSevenDateKeys() {
   return keys;
 }
 
+const INDIAN_SPEND_EVENTS = [
+  { name: 'Holi', month: 3, day: 14 },
+  { name: 'Eid season', month: 3, day: 31 },
+  { name: 'Akshaya Tritiya', month: 4, day: 30 },
+  { name: 'Raksha Bandhan', month: 8, day: 19 },
+  { name: 'Navratri', month: 9, day: 22 },
+  { name: 'Dussehra', month: 10, day: 2 },
+  { name: 'Diwali season', month: 10, day: 20 },
+  { name: 'Christmas & New Year', month: 12, day: 24 }
+];
+
+function daysBetween(fromDate, toDate) {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((toDate.getTime() - fromDate.getTime()) / msPerDay);
+}
+
+function buildUpcomingSpendingEvents(referenceDate = new Date(), horizonDays = 140) {
+  const base = new Date(referenceDate);
+  base.setHours(0, 0, 0, 0);
+  const years = [base.getFullYear(), base.getFullYear() + 1];
+
+  const rows = [];
+  for (const year of years) {
+    for (const event of INDIAN_SPEND_EVENTS) {
+      const date = new Date(year, event.month - 1, event.day);
+      const inDays = daysBetween(base, date);
+      if (inDays >= 0 && inDays <= horizonDays) {
+        rows.push({
+          name: event.name,
+          date,
+          inDays
+        });
+      }
+    }
+  }
+
+  return rows
+    .sort((left, right) => left.date - right.date)
+    .slice(0, 4)
+    .map((row) => `${row.name} in ${row.inDays} days (${row.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })})`);
+}
+
 function computeHealth(monthlySpent, todaySpent, wantsSpent, monthlyLimit, balance) {
   const usage = monthlyLimit > 0 ? (monthlySpent / monthlyLimit) * 100 : 0;
   const wantsRatio = monthlySpent > 0 ? (wantsSpent / monthlySpent) * 100 : 0;
@@ -670,7 +766,7 @@ function buildAlerts(health, budgetLeft, monthlySpent, monthlyLimit) {
   return alerts;
 }
 
-function buildFutureAlerts({ predictedNextMonth, monthlyBudgetLimit, averageDaily, wantsSharePercent }) {
+function buildFutureAlerts({ predictedNextMonth, monthlyBudgetLimit, averageDaily, wantsSharePercent, upcomingEvents = [] }) {
   const alerts = [];
   const forecastUsage = monthlyBudgetLimit > 0 ? (predictedNextMonth / monthlyBudgetLimit) * 100 : 0;
 
@@ -689,6 +785,14 @@ function buildFutureAlerts({ predictedNextMonth, monthlyBudgetLimit, averageDail
   if (averageDaily > 0) {
     const projectedDaily = toRupeeNumber(predictedNextMonth / 30);
     alerts.push({ priority: 'Low', title: 'Daily target for next month', message: `Try keeping daily spend near Rs ${Math.round(projectedDaily)}.` });
+  }
+
+  if (upcomingEvents.length) {
+    alerts.push({
+      priority: forecastUsage >= 80 || wantsSharePercent >= 60 ? 'Medium' : 'Low',
+      title: 'Upcoming festival/event spend risk',
+      message: `Watch upcoming events: ${upcomingEvents.join('; ')}. Plan a dedicated event budget to avoid overspend.`
+    });
   }
 
   return alerts.slice(0, 4);
@@ -867,6 +971,7 @@ async function fetchSharedState() {
 async function buildAnalyticsSnapshot() {
   const shared = await fetchSharedState();
   const now = new Date();
+  const upcomingEvents = buildUpcomingSpendingEvents(now);
   const currentMonth = monthKeyFromMs(now.getTime());
   const todayKey = dateKeyFromMs(now.getTime());
   const monthPayments = shared.transactions.filter((item) => monthKeyFromMs(item.timestamp_ms) === currentMonth);
@@ -926,7 +1031,8 @@ async function buildAnalyticsSnapshot() {
     predictedNextMonth,
     monthlyBudgetLimit: monthlyBudget,
     averageDaily,
-    wantsSharePercent: wantsShare
+    wantsSharePercent: wantsShare,
+    upcomingEvents
   });
   const dailyExpenseReport = buildDailyExpenseReport(monthEntries);
   const geminiInsights = await buildGeminiInsightsPayload({
@@ -937,6 +1043,8 @@ async function buildAnalyticsSnapshot() {
     budgetLeft: toRupeeNumber(budgetLeft),
     healthScore: health.score,
     forecast,
+    todayDate: now.toISOString().slice(0, 10),
+    upcomingEvents,
     entryCount: monthEntries.length,
     upiSpend: toRupeeNumber(phonepeSpend),
     cashTrackedSpend: toRupeeNumber(trackedCashSpend),
@@ -945,7 +1053,7 @@ async function buildAnalyticsSnapshot() {
 
   const snapshot = {
     source: {
-      db_path: process.env.FINSIGHT_DB_PATH || 'shared-phonepe-state',
+      db_path: process.env.FINSIGHT_SOURCE_LABEL || 'shared-phonepe-state',
       connected: shared.ok,
       transaction_count: monthEntries.length,
       phonepe_payment_count: shared.transactions.length,
@@ -1007,6 +1115,21 @@ async function buildAnalyticsSnapshot() {
         wantsSpent,
         monthlySpent
       }),
+      critical_points: [
+        `Wants share is ${toRupeeNumber(wantsShare)}%, monitor discretionary spends.`,
+        `Today spend is ₹${toRupeeNumber(todaySpent)} against daily safe cap ₹${toRupeeNumber(health.daily_safe_cap)}.`,
+        `Track-only cash entries are ₹${toRupeeNumber(trackedCashSpend)} this month.`
+      ],
+      investment_suggestion: budgetLeft > 5000
+        ? `Consider auto-moving ₹${toRupeeNumber(Math.max(500, Math.round(budgetLeft * 0.1)))} into a low-risk liquid fund or RD after monthly bills.`
+        : 'Stabilize spending first, then start with a small ₹500 recurring investment.',
+      future_opportunities: [
+        `If wants are cut by 10%, you can redirect about ₹${toRupeeNumber(wantsSpent * 0.1)} monthly to savings/investment.`,
+        `Set a weekend-only spending cap to reduce impulse spends.`,
+        upcomingEvents.length
+          ? `Create a festival/events envelope for ${upcomingEvents[0]} to prevent sudden overspend.`
+          : 'Keep a small monthly buffer for seasonal spikes in spends.'
+      ],
       active_emi_count: 0,
       active_installments_remaining: 0,
       gemini_live: Boolean(process.env.GEMINI_API_KEY),
@@ -1048,6 +1171,15 @@ async function buildAnalyticsSnapshot() {
     if (geminiInsights.need_want_insight) {
       snapshot.insights.need_want_insight = geminiInsights.need_want_insight;
     }
+    if (geminiInsights.critical_points?.length) {
+      snapshot.insights.critical_points = geminiInsights.critical_points;
+    }
+    if (geminiInsights.investment_suggestion) {
+      snapshot.insights.investment_suggestion = geminiInsights.investment_suggestion;
+    }
+    if (geminiInsights.future_opportunities?.length) {
+      snapshot.insights.future_opportunities = geminiInsights.future_opportunities;
+    }
   }
 
   return snapshot;
@@ -1085,7 +1217,9 @@ function buildTransactionsCsv(transactions) {
 
 await loadEnvFile();
 initializeMarketplaceSchema();
-monthlyBudget = Number(process.env.FINSIGHT_BUDGET || 1000000000);
+monthlyBudget = loadMonthlyBudgetFromDb(Number(process.env.FINSIGHT_BUDGET || 1000000000));
+recordBudget({ source: 'finsight', monthlyBudget, note: 'Startup budget load' });
+syncCommonStateFromFinSight();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -1101,6 +1235,39 @@ const server = http.createServer(async (req, res) => {
         sourceConnected: snapshot.source.connected
       }
     });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/common/state') {
+    sendJson(res, 200, { ok: true, data: readSharedState() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/common/ledger') {
+    sendJson(res, 200, { ok: true, data: readSharedLedger() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/common/data') {
+    sendJson(res, 200, { ok: true, data: readCommonDataSnapshot() });
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/supabase/health') {
+    const data = await getSupabaseHealthSnapshot();
+    sendJson(res, 200, { ok: true, data });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/common/state') {
+    try {
+      const body = await readJsonBody(req);
+      const patch = body && typeof body.patch === 'object' && body.patch ? body.patch : {};
+      const data = mergeSharedState(patch, body.updatedBy || 'finsight');
+      sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: error.message });
+    }
     return;
   }
 
@@ -1187,6 +1354,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       monthlyBudget = nextLimit;
+      setSetting('monthly_budget', monthlyBudget);
+      recordBudget({ source: 'finsight', monthlyBudget, note: 'Budget updated via API' });
+      syncCommonStateFromFinSight();
       sendJson(res, 200, {
         message: 'Budget updated',
         monthly_limit: toRupeeNumber(monthlyBudget)
@@ -1522,6 +1692,17 @@ const server = http.createServer(async (req, res) => {
         expiry: String(body.expiry || '')
       };
       const saved = insertMarketplaceListing(listing);
+      recordMarketplaceListing({
+        source: 'finsight',
+        type: saved.type,
+        brand: saved.brand,
+        originalValue: saved.originalValue,
+        askingPrice: saved.askingPrice,
+        platformFee: saved.platformFee,
+        sellerNote: saved.sellerNote,
+        expiry: saved.expiry,
+        status: saved.status
+      });
       sendJson(res, 201, { message: 'Listing created successfully', listing: saved });
     } catch (error) {
       sendJson(res, 400, { message: error.message });
@@ -1549,4 +1730,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`FinSight demo running at http://localhost:${port}`);
+  console.log(`Gemini mode: ${process.env.GEMINI_API_KEY ? 'live' : 'fallback'}`);
 });

@@ -51,3 +51,51 @@ Seven — Demo flow must work flawlessly — PhonePe payment to FinSight live up
 
 Demo Script for Judges
 Open FinSight dashboard showing score 84 and three green streak boxes. Open PhonePe side by side. Make rupees 800 Swiggy payment tagged as Food and Want. Watch FinSight score drop live to 61 turning red. Alert fires saying third food delivery this week. Pie chart Food slice grows. Streak box for today turns red. Show Next Week Forecast predicting rupees 8400 for upcoming weekend plus Eid. Open Marketplace and list a PVR gift card of rupees 500 for rupees 350. Show platform fee of rupees 10 auto-calculated. Export Weekly Report as PDF — live download. Total demo time 90 seconds.
+
+Firebase Seed and Query Commands
+Use these scripts to populate Firestore with realistic historical data and verify reads.
+
+1) Provide Firebase credentials (pick one method)
+- Option A: export FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/service-account.json
+- Option B: export FIREBASE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
+- Optional: export FIREBASE_PROJECT_ID=your-project-id
+
+2) Seed Firestore with past data
+- npm run seed:firebase
+
+This seeds these collections:
+- transactions
+- budget/current
+- wallet/current
+- emis
+- goals
+- streak
+- marketplace
+
+3) Run query check
+- npm run check:firebase
+
+This prints a JSON snapshot containing:
+- budget
+- recent transactions
+- active marketplace listings
+- sample spend summary (UPI + cash sample)
+
+Supabase SQL and Connection
+Use this when moving from Firebase to Supabase.
+
+1) Set env values in root .env (see .env.example)
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- SUPABASE_ANON_KEY
+- SUPABASE_DB_URL
+
+2) Run SQL schema + seed in Supabase Postgres
+- psql "$SUPABASE_DB_URL" -f scripts/supabase/schema_and_seed.sql
+
+3) Quick health check from project
+- npm run supabase:health
+
+4) API checks (after servers are running)
+- GET /api/supabase/health on PhonePe server
+- GET /api/supabase/health on FinSight server
