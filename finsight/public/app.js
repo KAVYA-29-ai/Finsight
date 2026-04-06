@@ -8,8 +8,16 @@ const state = {
   detailedReport: null
 };
 
-// Get API base URL from environment, fallback to local dev
-const apiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_FINSIGHT_API_URL || '';
+function sanitizeConfigValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.includes('%VITE_')) return '';
+  return raw.replace(/\/$/, '');
+}
+
+const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || {}) : {};
+
+// Runtime API base URL injected from index.html; empty means same-origin (/api) for local proxy.
+const apiBase = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.FINSIGHT_API_URL) || '';
 
 function apiUrl(path) {
   if (!path.startsWith('/')) return path;
@@ -56,7 +64,14 @@ async function apiGet(url) {
     throw new Error(text || `Request failed: ${url}`);
   }
   const text = await response.text();
-  return text ? JSON.parse(text) : {};
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    const hint = apiBase
+      ? `API returned non-JSON response from ${apiBase}. Check API deployment and URL.`
+      : 'API returned non-JSON response. For deployment, set VITE_FINSIGHT_API_URL in Vercel.';
+    throw new Error(hint);
+  }
 }
 
 async function apiSend(url, method, body = {}) {

@@ -269,6 +269,12 @@
         </section>
       </section>
     </main>
+    <script type="module">
+      window.__APP_CONFIG__ = {
+        API_URL: import.meta.env.VITE_API_URL || '',
+        FINSIGHT_API_URL: import.meta.env.VITE_FINSIGHT_API_URL || ''
+      };
+    </script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
