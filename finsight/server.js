@@ -1252,7 +1252,11 @@ function buildTransactionsCsv(transactions) {
 }
 
 await loadEnvFile();
-monthlyBudget = await readLatestBudgetRecord(Number(process.env.FINSIGHT_BUDGET || 1000000000));
+try {
+  monthlyBudget = await readLatestBudgetRecord(Number(process.env.FINSIGHT_BUDGET || 1000000000));
+} catch {
+  monthlyBudget = Number(process.env.FINSIGHT_BUDGET || 1000000000);
+}
 
 export async function handleRequest(req, res) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);

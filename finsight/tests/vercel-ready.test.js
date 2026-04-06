@@ -20,7 +20,9 @@ test('finsight vercel build config is valid', async () => {
   assert.equal(vercel.framework, 'vite');
   assert.equal(vercel.buildCommand, 'npm run build');
   assert.equal(vercel.outputDirectory, 'dist');
-  assert.ok(Array.isArray(vercel.rewrites) && vercel.rewrites.length > 0);
+  assert.ok(Array.isArray(vercel.routes) && vercel.routes.length > 0);
+  assert.equal(vercel.routes[0]?.handle, 'filesystem');
+  assert.ok(vercel.functions?.['api/[...path].js']);
 });
 
 test('finsight workspace includes build and test scripts', async () => {

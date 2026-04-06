@@ -61,7 +61,12 @@ async function apiGet(url) {
   const response = await fetch(apiUrl(url));
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed: ${url}`);
+    try {
+      const payload = text ? JSON.parse(text) : {};
+      throw new Error(payload?.message || payload?.error || `Request failed: ${url}`);
+    } catch {
+      throw new Error(text || `Request failed: ${url}`);
+    }
   }
   const text = await response.text();
   try {
@@ -69,7 +74,7 @@ async function apiGet(url) {
   } catch {
     const hint = apiBase
       ? `API returned non-JSON response from ${apiBase}. Check API deployment and URL.`
-      : 'API returned non-JSON response. For deployment, set VITE_FINSIGHT_API_URL in Vercel.';
+      : 'API returned non-JSON response. Check Vercel rewrites so /api/* is not routed to index.html.';
     throw new Error(hint);
   }
 }
@@ -405,6 +410,12 @@ async function refreshDashboard() {
   ]);
 
   state.summary = summary;
+
+  if (summary?.source?.connected === false) {
+    const sourceMessage = summary?.source?.message || summary?.source?.db_path || 'Supabase backend is disconnected.';
+    throw new Error(`Supabase not connected: ${sourceMessage}`);
+  }
+
   state.categories = categories;
   state.daily = daily;
   state.insights = insights;
