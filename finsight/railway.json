@@ -1,0 +1,4 @@
+{
+  "nodeVersion": "20.x",
+  "public": "dist"
+}

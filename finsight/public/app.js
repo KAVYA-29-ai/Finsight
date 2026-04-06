@@ -8,11 +8,13 @@ const state = {
   detailedReport: null
 };
 
-const apiBase = '';
+// Get API base URL from environment, fallback to local dev
+const apiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_FINSIGHT_API_URL || '';
 
 function apiUrl(path) {
   if (!path.startsWith('/')) return path;
-  return `${apiBase}${path}`;
+  if (apiBase && !path.startsWith('http')) return `${apiBase}${path}`;
+  return path;
 }
 
 function formatRupee(value) {

@@ -1256,6 +1256,18 @@ monthlyBudget = await readLatestBudgetRecord(Number(process.env.FINSIGHT_BUDGET 
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  
+  // CORS headers - allow frontend from different domain to call this API
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Handle preflight OPTIONS requests
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/config') {
     const snapshot = await buildAnalyticsSnapshot();

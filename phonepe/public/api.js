@@ -1,5 +1,9 @@
+// Get API base URL from environment, fallback to local dev
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_PHONEPE_API_URL || '';
+
 async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+  const response = await fetch(fullUrl, {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})

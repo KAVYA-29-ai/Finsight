@@ -1,16 +1,33 @@
 # Finsight Deployment Guide
 
-Complete step-by-step guide to deploy **PhonePe** and **FinSight** apps on Vercel.
+Complete step-by-step guide to deploy **PhonePe** and **FinSight** with proper architecture:
+- **Frontend (UI):** Vercel (static build)
+- **API (Node.js):** Railway (Node.js hosting)
+- **Database:** Supabase
+
+---
+
+## 🏗️ Why This Architecture?
+
+**Problem:** Vercel doesn't run Node.js servers (like `server.js`), only static files.  
+**Solution:** Deploy frontend to Vercel + API to Railway with CORS enabled.
+
+```
+User Browser
+     ↓
+  Vercel (Frontend) ←→ Railway (API) ←→ Supabase
+```
 
 ---
 
 ## Table of Contents
-1. [Prerequisites](#prerequisites)
-2. [Repository Setup](#repository-setup)
-3. [Vercel Project Creation](#vercel-project-creation)
-4. [Environment Variables](#environment-variables)
-5. [Deploy & Verify](#deploy--verify)
-6. [Troubleshooting](#troubleshooting)
+1. [Part 1: Frontend Deployment (Vercel)](#part-1-frontend-deployment-vercel)
+2. [Part 2: API Deployment (Railway)](#part-2-api-deployment-railway)
+3. [Part 3: Connect Frontend to API](#part-3-connect-frontend-to-api)
+4. [Testing & Verification](#testing--verification)
+5. [Troubleshooting](#troubleshooting)
+
+
 
 ---
 
@@ -18,336 +35,409 @@ Complete step-by-step guide to deploy **PhonePe** and **FinSight** apps on Verce
 
 ### Required Accounts
 - ✅ GitHub account (repo already connected)
-- ✅ Vercel account (free tier sufficient)
-- ✅ Supabase account + configured database
+- ✅ Vercel account (free tier)
+- ✅ Railway account ([railway.app](https://railway.app))
+- ✅ Supabase account + database
 - ✅ Google Gemini API key
 
-### Required Keys/URLs
+### Required Keys (Get Before Starting!)
 
-Get these before starting deployment:
-
-#### Supabase
-1. Go to [supabase.com](https://supabase.com) → Project Settings
-2. Copy:
-   - `SUPABASE_URL` (from API section)
-   - `SUPABASE_ANON_KEY` (Public API Key)
-   - `SUPABASE_SERVICE_ROLE_KEY` (Secret)
-   - `SUPABASE_DB_URL` (Database URL, if needed)
-
-#### Gemini API
-1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
-2. Create API key
-3. Copy `GEMINI_API_KEY`
-
----
-
-## Repository Setup
-
-### 1. Verify `.env` is NOT tracked
-
-```bash
-cd /workspaces/Finsight
-git status
-
-# Expected output:
-# On branch main
-# nothing to commit, working tree clean
+**Supabase:**
+```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1...
 ```
 
-`.env` file contains real secrets and MUST NOT be in git history.
-
-✅ **Already done:** Root `.env` removed from tracking
-
-### 2. Commit & Push
-
-```bash
-git add -A
-git commit -m "chore: add vercel deploy config and tests
-
-- Add vercel.json for both apps
-- Add smoke tests for deployment validation
-- Secure env handling with .gitignore
-"
-git push origin main
+**Gemini:**
+```
+GEMINI_API_KEY=AIzaSyD7...
 ```
 
 ---
 
-## Vercel Project Creation
+## Part 1: Frontend Deployment (Vercel)
 
-### Option 1: Deploy via Vercel Dashboard (Recommended)
-
-#### Step 1: Import PhonePe Project
+### Step 1.1: Deploy PhonePe Frontend
 
 1. Go to [vercel.com/new](https://vercel.com/new)
 2. Click **"Continue with GitHub"**
 3. Select **Finsight** repository
 4. Configure:
-   - **Project Name:** `finsight-phonepe` (or your choice)
+   - **Project Name:** `finsight-phonepe`
    - **Framework Preset:** `Vite`
    - **Root Directory:** `phonepe/`
-   - **Build Command:** Override if needed → `npm run build`
+   - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
-5. Click **Deploy**
+5. Click **Deploy** and wait ✅
 
-#### Step 2: Import FinSight Project
+### Step 1.2: Deploy FinSight Frontend
 
 1. Go back to [vercel.com/new](https://vercel.com/new)
-2. Import same **Finsight** repo again (different project)
-3. Configure:
-   - **Project Name:** `finsight-dashboard` (or your choice)
+2. Click **"Continue with GitHub"**
+3. Select **Finsight** repository again
+4. Configure:
+   - **Project Name:** `finsight-dashboard`
    - **Framework Preset:** `Vite`
    - **Root Directory:** `finsight/`
-   - **Build Command:** Override if needed → `npm run build`
+   - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
-4. Click **Deploy**
+5. Click **Deploy** and wait ✅
+
+**After deployment:**
+```
+PhonePe Frontend: https://finsight-phonepe.vercel.app
+FinSight Frontend: https://finsight-dashboard.vercel.app
+```
+
+note: Will show errors until API deployed (step 2) ⚠️
+
+---
+
+## Part 2: API Deployment (Railway)
+
+Railway is where we run the Node.js servers (`phonepe/server.js` and `finsight/server.js`).
+
+### Step 2.1: Deploy PhonePe API
+
+1. Go to [railway.app/dashboard](https://railway.app/dashboard)
+2. Click **New Project**
+3. Select **Deploy from GitHub repo**
+4. Choose **Finsight** repository
+5. Configure:
+   - **Root Directory:** `phonepe/` 
+   - **Build Command:** (leave empty, uses Procfile)
+   - **Start Command:** `node server.js`
+6. Click **Deploy**
+
+### Step 2.2: Set PhonePe Environment Variables (Railway)
+
+1. In Railway Dashboard → Your PhonePe project
+2. Go to **Variables** tab
+3. Add these variables:
+
+```
+PHONEPE_PORT=3000
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+4. Click **Deploy** (Railway auto-redeploys)
+
+### Step 2.3: Get PhonePe API URL
+
+1. Railway Dashboard → PhonePe project
+2. Go to **Deployments** tab
+3. Click latest deployment → **Public URL**
+4. Copy this URL
+
+**This is your `PHONEPE_API_URL`** (save it, need in step 3)
+
+### Step 2.4: Deploy FinSight API
+
+Repeat 2.1-2.3 but:
+- Root Directory: `finsight/`
+- Environment Variables:
+
+```
+FINSIGHT_PORT=3001
+FINSIGHT_SOURCE_LABEL=shared-phonepe-state
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+GEMINI_API_KEY=AIzaSyD7Di2XsfOXefEwQW2qSK9zkqSDG6sn0cw
+GEMINI_MODEL=gemini-3-flash-preview
+```
+
+Note: Copy **FINSIGHT_API_URL** from public URL (save it)
+
+---
+
+## Part 3: Connect Frontend to API
+
+Now we tell Vercel where the APIs are.
+
+### Step 3.1: Set PhonePe Frontend Environment Variables
+
+1. Vercel Dashboard → **finsight-phonepe** project
+2. Go to **Settings** → **Environment Variables**
+3. Add:
+
+```
+VITE_PHONEPE_API_URL=https://phonepe-api-xxxxx.railway.app
+```
+
+**Important:** Use `VITE_` prefix so Vite includes it in the build
+
+4. **Important:** Click **Redeploy** (Deployments tab) to rebuild with new env var
+
+### Step 3.2: Set FinSight Frontend Environment Variables
+
+1. Vercel Dashboard → **finsight-dashboard** project
+2. Go to **Settings** → **Environment Variables**
+3. Add:
+
+```
+VITE_FINSIGHT_API_URL=https://finsight-api-yyyyy.railway.app
+```
+
+**Important:** Use `VITE_` prefix so Vite includes it in the build
+
+4. **Important:** Click **Redeploy** (Deployments tab) to rebuild with new env var
+
+---
+
+## Testing & Verification
+
+### Test 1: API Health Check
+
+```bash
+curl https://phonepe-api-xxxxx.railway.app/api/supabase/health 
+```
+
+Should return:
+```json
+{ "ok": true, "data": { "connected": true } }
+```
+
+### Test 2: Load Frontend
+
+Visit:
+```
+https://finsight-phonepe.vercel.app
+https://finsight-dashboard.vercel.app
+```
+
+Should show: UI loads, no JSON errors ✅
+
+### Test 3: Data Flows
+
+1. Open DevTools (F12)
+2. Go to **Network** tab
+3. Click "Refresh Data" button
+4. Check API calls succeed (status 200) ✅
 
 ---
 
 ## Environment Variables
 
-### PhonePe App (API + UI)
+### PhonePe App
 
-1. Go to Vercel Dashboard → **finsight-phonepe** project
-2. Click **Settings** → **Environment Variables**
-3. Add the following variables (for all environments):
+| Location | Variable | Value |
+|----------|----------|-------|
+| Vercel | `VITE_PHONEPE_API_URL` | `https://phonepe-api-xxxxx.railway.app` |
+| Railway | `PHONEPE_PORT` | `3000` |
+| Railway | `SUPABASE_URL` | `https://your-project.supabase.co` |
+| Railway | `SUPABASE_ANON_KEY` | *(from Supabase)* |
+| Railway | `SUPABASE_SERVICE_ROLE_KEY` | *(from Supabase)* |
 
-```
-PHONEPE_PORT=3000
-SUPABASE_URL=https://mpdawhmfiqeyfxbsuxeq.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+### FinSight App
 
-**Steps per variable:**
-- Variable Name: `PHONEPE_PORT` → Value: `3000` → Select all environments → Save
-- Repeat for other variables
-
-### FinSight App (Dashboard + Analytics)
-
-1. Go to Vercel Dashboard → **finsight-dashboard** project
-2. Click **Settings** → **Environment Variables**
-3. Add the following variables (for all environments):
-
-```
-FINSIGHT_PORT=3001
-FINSIGHT_SOURCE_LABEL=shared-phonepe-state
-SUPABASE_URL=https://mpdawhmfiqeyfxbsuxeq.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-GEMINI_API_KEY=AIzaSyD7...
-GEMINI_MODEL=gemini-3-flash-preview
-```
-
----
-
-## Deploy & Verify
-
-### Automatic Deployment
-
-✅ **Already configured:** Vercel auto-deploys on `git push origin main`
-
-Every push triggers:
-1. Build from source
-2. Run tests
-3. Deploy to production
-
-### Manual Trigger (if needed)
-
-1. Vercel Dashboard → Select project
-2. Click **Deployments**
-3. Find latest deployment → Click **Redeploy**
-
-### Verify Deployments
-
-#### Check Build Success
-```
-Vercel Dashboard → Deployments → Click latest deployment
-Expected status: ✅ Ready (green)
-```
-
-#### Test PhonePe App
-```
-https://finsight-phonepe.vercel.app
-```
-
-#### Test FinSight App
-```
-https://finsight-dashboard.vercel.app
-```
-
-#### Quick Health Check
-```bash
-# From your local machine
-curl -s https://finsight-phonepe.vercel.app/api/supabase/health | jq .
-
-# Expected response:
-# {
-#   "connected": true,
-#   "message": "Supabase connected",
-#   "db": "Connected"
-# }
-```
+| Location | Variable | Value |
+|----------|----------|-------|
+| Vercel | `VITE_FINSIGHT_API_URL` | `https://finsight-api-yyyyy.railway.app` |
+| Railway | `FINSIGHT_PORT` | `3001` |
+| Railway | `SUPABASE_URL` | `https://your-project.supabase.co` |
+| Railway | `SUPABASE_ANON_KEY` | *(from Supabase)* |
+| Railway | `SUPABASE_SERVICE_ROLE_KEY` | *(from Supabase)* |
+| Railway | `GEMINI_API_KEY` | *(from Google)* |
+| Railway | `GEMINI_MODEL` | `gemini-3-flash-preview` |
 
 ---
 
 ## Troubleshooting
 
-### Build Fails: "Cannot find module"
+### "Unexpected token '<', "<!doctype..."
 
-**Cause:** Missing dependency in package.json
-  
-**Fix:**
+**Problem:** Frontend trying to call API that's down or using wrong URL
+
+**Check:**
+1. Is Railway API deployed and running?
 ```bash
-# In root
-npm install
-npm run build -w phonepe
-npm run build -w finsight
-
-# Commit changes
-git add package-lock.json
-git commit -m "chore: update dependencies"
-git push
+curl https://phonepe-api-xxxxx.railway.app/api/supabase/health
 ```
 
-### 502 Bad Gateway on API calls
+2. Is Vercel env variable set with `VITE_` prefix?
+```
+Vercel → Settings → Environment Variables 
+Check: VITE_PHONEPE_API_URL or VITE_FINSIGHT_API_URL exists
+```
 
-**Cause:** Server logic issue or missing env vars
-  
+3. Did you redeploy Vercel after adding env vars?
+```
+Vercel → Deployments → Redeploy latest
+```
+
+**Fix:**
+- Add `VITE_PHONEPE_API_URL=https://railway-url...` to Vercel
+- **Must** use `VITE_` prefix (without it, env var won't be available in frontend)
+- Redeploy Vercel frontend
+- Wait 2-3 minutes
+- Refresh browser cache (Ctrl+Shift+R)
+
+### CORS Error in Console
+
+**Status:** ✅ Fixed in code (CORS headers added to server.js)
+
+**If still happening:**
+```bash
+# Redeploy API with latest code
+git pull origin main
+# Railway auto-redeploys on git push
+```
+
+### Cannot Connect to Supabase
+
 **Debug:**
 ```bash
-# 1. Check Vercel env variables are set
-Vercel Dashboard → Settings → Environment Variables
+# Test API locally
+node finsight/server.js
 
-# 2. Check server logs
-Vercel Dashboard → Deployments → Click deployment → Function Logs
-
-# 3. For local testing
-node phonepe/server.js
-curl http://localhost:3000/api/supabase/health
+#Check  Supabase connection
+curl http://localhost:3001/api/supabase/health
 ```
 
-### "Cannot connect to Supabase"
-
-**Cause:** Missing or incorrect `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`
-  
 **Fix:**
-1. Verify keys in Vercel Settings
-2. Test locally:
-   ```bash
-   SUPABASE_URL="..." npm run supabase:health
-   ```
-3. Re-deploy after fixing env vars
+1. Verify SUPABASE_URL correct
+2. Verify SUPABASE_SERVICE_ROLE_KEY correct
+3. Check Supabase project is active
+4. Redeploy Railway app
 
-### Tests Fail in Vercel
+### 503 Supabase Not Configured
 
-**Cause:** Tests can't find config files in build environment
-  
-**Current Status:** ✅ Tests are optional (not blocking deploy)
-  
-**To make tests required:**
+**Cause:** Missing env variables in Railway
+
+**Fix:**
+1. Railway Dashboard → Variables
+2. Add all required vars
+3. Click Deploy
+4. Wait 2-3 minutes for restart
+
+### Build Fails on Vercel
+
+**Fix:**
 ```bash
-# Modify package.json buildCommand
-"build": "npm run test && npm run build"
-```
-
----
-
-## Project URLs After Deployment
-
-| Service | URL | Purpose |
-|---------|-----|---------|
-| PhonePe App | `https://finsight-phonepe.vercel.app` | Wallet UI + API |
-| FinSight App | `https://finsight-dashboard.vercel.app` | Analytics Dashboard |
-| GitHub Repo | `https://github.com/KAVYA-29-ai/Finsight` | Source Code |
-
----
-
-## Quick Commands Reference
-
-### Local Development
-```bash
-# Install dependencies
 npm install
-
-# Run both apps locally
-npm run dev
-
-# Run PhonePe only
-npm run dev:phonepe
-
-# Run FinSight only
-npm run dev:finsight
-
-# Build for production
-npm run build
-
-# Run tests
-npm run test
-```
-
-### Git & Deploy
-```bash
-# Stage & commit changes
-git add -A
-git commit -m "your message"
-
-# Deploy to Vercel
+git add package-lock.json
+git commit -m "fix: update dependencies"
 git push origin main
-
-# Check deployment status
-git log --oneline -5
 ```
 
 ---
 
-## Security Checklist
+## Project URLs After Full Deployment
 
-Before each deployment:
-
-- ✅ `.env` is NOT in git (`git ls-files | grep .env`)
-- ✅ Only `.env.example` has template values
-- ✅ All secrets in Vercel ENV variables, not in code
-- ✅ `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are kept private
-- ✅ `.gitignore` includes `node_modules/`, `.vercel/`
+| Service | URL | Type |
+|---------|-----|------|
+| PhonePe Frontend | https://finsight-phonepe.vercel.app | Vercel |
+| FinSight Frontend | https://finsight-dashboard.vercel.app | Vercel |
+| PhonePe API | https://phonepe-api-xxxxx.railway.app | Railway |
+| FinSight API | https://finsight-api-yyyyy.railway.app | Railway |
+| Supabase DB | https://your-project.supabase.co | Supabase |
 
 ---
 
-## Environment Variable Reference
+## Deployment Checklist
 
-### All Available Variables
+- [ ] PhonePe frontend deployed on Vercel
+- [ ] FinSight frontend deployed on Vercel
+- [ ] PhonePe API deployed on Railway
+- [ ] FinSight API deployed on Railway
+- [ ] Railway env variables set (Supabase + Gemini keys)
+- [ ] Vercel env variables set (API URLs)
+- [ ] Both frontends redeployed after adding API URLs
+- [ ] API health checks pass
+- [ ] Frontend loads without JSON errors
+- [ ] Data flows from UI to API to Supabase
+
+---
+
+## Local Testing Before Deployment
+
+### 1. Both APIs Running Locally
+
+```bash
+# Terminal 1: PhonePe API
+cd phonepe
+node server.js
+
+# Terminal 2: FinSight API
+cd finsight
+node server.js
+
+# Terminal 3: Frontend apps
+npm run dev
+```
+
+### 2. Test API Health
+
+```bash
+curl http://localhost:3000/api/supabase/health
+curl http://localhost:3001/api/supabase/health
+```
+
+### 3. Test Frontend
+
+- Open http://localhost:5173 (PhonePe)
+- Open http://localhost:5174 (FinSight)
+- Click "Refresh Data" button
+- **Check Network tab:**
+  - All API calls should be 200
+  - Data should display without JSON errors
+
+---
+
+## Quick Reference
+
+### Vercel Environment Variables (Frontend)
+
+**Important:** Use `VITE_` prefix! Without it, env vars won't be available in frontend build.
 
 ```
-# Port Configuration
+VITE_PHONEPE_API_URL=https://phonepe-api-xxxxx.railway.app
+VITE_FINSIGHT_API_URL=https://finsight-api-yyyyy.railway.app
+```
+
+### Railway Environment Variables (API)
+
+```
 PHONEPE_PORT=3000
-FINSIGHT_PORT=3001
-
-# Application State
-FINSIGHT_SOURCE_LABEL=shared-phonepe-state
-
-# Supabase (Database)
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=eyJhb...
-SUPABASE_SERVICE_ROLE_KEY=eyJhb...
-SUPABASE_DB_URL=postgresql://user:pass@host/db
-
-# Google Gemini (AI)
-GEMINI_API_KEY=AIzaSy...
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+GEMINI_API_KEY=AIzaSyD7Di2XsfOXefEwQW2qSK9zkqSDG6sn0cw
 GEMINI_MODEL=gemini-3-flash-preview
 ```
 
+### Manual Redeploy Steps
+
+**Vercel:**
+1. Dashboard → Project
+2. Deployments tab
+3. Find latest → Redeploy
+
+**Railway:**
+1. Dashboard → Project
+2. Deployments tab
+3. Redeploy latest
+
 ---
 
-## Need Help?
+## Key Files Added for Deployment
 
-| Issue | Solution |
-|-------|----------|
-| Deployment stuck | Check Vercel Dashboard → Function Logs |
-| App not loading | Verify `.vercel.json` config in app directory |
-| API 503 error | Check SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in prod env |
-| Build timeout | Increase vercel timeout in `vercel.json` |
+- `phonepe/Procfile` - tells Railway how to start PhonePe server
+- `phonepe/railway.json` - Railway config for PhonePe
+- `phonepe/vercel.json` - Vercel config for PhonePe frontend
+- `finsight/Procfile` - tells Railway how to start FinSight server
+- `finsight/railway.json` - Railway config for FinSight
+- `finsight/vercel.json` - Vercel config for FinSight frontend
+- `.env.example` - shows all required env variable template
+
+All include CORS headers so frontend can call API from different domain ✅
 
 ---
 
 **Last Updated:** April 6, 2026  
-**Verified:** ✅ Both apps tested locally and build-validated for Vercel
+**Deployment Method:** Vercel (Frontend) + Railway (API) + Supabase (Database)  
+**Status:** ✅ Ready to deploy
