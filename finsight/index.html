@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FinSight Demo</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script>
+      window.__APP_CONFIG__ = {
+        API_URL: '',
+        FINSIGHT_API_URL: '',
+        SUPABASE_URL: '%VITE_SUPABASE_URL%',
+        SUPABASE_ANON_KEY: '%VITE_SUPABASE_ANON_KEY%',
+        GEMINI_API_KEY: '%VITE_GEMINI_API_KEY%',
+        GEMINI_MODEL: '%VITE_GEMINI_MODEL%'
+      };
+    </script>
   </head>
   <body>
     <div class="money-float money-a">₹</div>
@@ -232,6 +242,67 @@
             <button id="download-report" class="primary-btn" type="button">Download report</button>
             <button id="download-csv" class="ghost-btn" type="button">Download CSV</button>
           </div>
+        </section>
+
+        <section class="card panel" data-section="marketplace">
+          <div class="section-head">
+            <h3>Marketplace</h3>
+            <span class="pill">Gift Cards & Coupons</span>
+          </div>
+
+          <article class="card">
+            <h4>Sell Your Coupon/Card</h4>
+            <p class="muted">List your unused gift cards or coupons for other users.</p>
+
+            <div class="form-grid">
+              <label>Type
+                <select id="marketplace-type">
+                  <option value="gift-card">Gift Card</option>
+                  <option value="coupon">Coupon</option>
+                </select>
+              </label>
+
+              <label>Brand
+                <input id="marketplace-brand" type="text" placeholder="PVR, Zomato, Amazon" />
+              </label>
+
+              <label>Original Value (₹)
+                <input id="marketplace-original" type="number" min="1" step="1" placeholder="500" />
+              </label>
+
+              <label>Asking Price (₹)
+                <input id="marketplace-asking" type="number" min="1" step="1" placeholder="350" />
+              </label>
+
+              <label>Expiry
+                <input id="marketplace-expiry" type="date" />
+              </label>
+
+              <label>Note
+                <input id="marketplace-note" type="text" placeholder="Optional note for buyers" />
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button id="marketplace-list-btn" class="primary-btn" type="button">List Item</button>
+              <span id="marketplace-sell-result" class="muted"></span>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h4>Active Listings</h4>
+            </div>
+
+            <div class="button-row">
+              <input id="marketplace-search" type="text" placeholder="Search by brand/type" />
+              <button id="marketplace-refresh-btn" class="ghost-btn" type="button">Refresh Listings</button>
+            </div>
+
+            <div id="marketplace-listings" class="list-stack">
+              <p class="muted">Loading listings...</p>
+            </div>
+          </article>
         </section>
 
         <section class="card panel" data-section="track">

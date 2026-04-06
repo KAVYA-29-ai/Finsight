@@ -1,3 +1,5 @@
+import { browserApiGet, browserApiSend } from './browser-api.js';
+
 const state = {
   view: 'home',
   summary: null,
@@ -15,6 +17,7 @@ function sanitizeConfigValue(value) {
 }
 
 const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || {}) : {};
+const USE_BROWSER_ONLY = true;
 
 // Runtime API base URL injected from index.html; empty means same-origin (/api) for local proxy.
 const apiBase = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.FINSIGHT_API_URL) || '';
@@ -58,6 +61,10 @@ async function fileToBase64(file) {
 }
 
 async function apiGet(url) {
+  if (USE_BROWSER_ONLY) {
+    return browserApiGet(url);
+  }
+
   const response = await fetch(apiUrl(url));
   if (!response.ok) {
     const text = await response.text();
@@ -80,6 +87,10 @@ async function apiGet(url) {
 }
 
 async function apiSend(url, method, body = {}) {
+  if (USE_BROWSER_ONLY) {
+    return browserApiSend(url, method, body);
+  }
+
   const response = await fetch(apiUrl(url), {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -737,8 +748,16 @@ async function downloadReport() {
   URL.revokeObjectURL(url);
 }
 
-function downloadCsv() {
-  window.location.href = '/api/analytics/transactions-csv';
+async function downloadCsv() {
+  const payload = await apiGet('/api/analytics/transactions-csv');
+  const csvText = String(payload?.csv || '');
+  const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = `finsight-transactions-${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(blobUrl);
 }
 
 function showResult(message, tone = 'warning') {
@@ -824,7 +843,7 @@ document.addEventListener('click', async (event) => {
     }
 
     if (event.target.closest('#download-csv')) {
-      downloadCsv();
+      await downloadCsv();
       return;
     }
 
@@ -836,6 +855,12 @@ document.addEventListener('click', async (event) => {
     }
   } catch (error) {
     showResult(error.message, 'critical');
+  }
+});
+
+document.addEventListener('input', (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.id === 'marketplace-search') {
+    loadMarketplaceListings().catch((error) => showResult(error.message, 'critical'));
   }
 });
 

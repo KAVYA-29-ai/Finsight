@@ -1,3 +1,5 @@
+import { createPhonePeBrowserApi } from './supabase-browser.js';
+
 function sanitizeConfigValue(value) {
 	const raw = String(value || '').trim();
 	if (!raw || raw.includes('%VITE_')) return '';
@@ -6,6 +8,8 @@ function sanitizeConfigValue(value) {
 
 const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || {}) : {};
 const API_BASE = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.PHONEPE_API_URL) || '';
+const USE_REMOTE_API = false;
+const browserApi = createPhonePeBrowserApi();
 
 async function requestJson(url, options = {}) {
 	const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
@@ -33,10 +37,12 @@ async function requestJson(url, options = {}) {
 
 export const api = {
 	async getState() {
+		if (!USE_REMOTE_API) return browserApi.getState();
 		const payload = await requestJson('/api/state');
 		return payload.data;
 	},
 	async addMoney(amount) {
+		if (!USE_REMOTE_API) return browserApi.addMoney(amount);
 		const payload = await requestJson('/api/wallet/add', {
 			method: 'POST',
 			body: JSON.stringify({ amount })
@@ -44,6 +50,7 @@ export const api = {
 		return payload.data;
 	},
 	async createTransaction(data) {
+		if (!USE_REMOTE_API) return browserApi.createTransaction(data);
 		const payload = await requestJson('/api/transactions', {
 			method: 'POST',
 			body: JSON.stringify(data)
@@ -51,6 +58,7 @@ export const api = {
 		return payload.data;
 	},
 	async createReceipt(data) {
+		if (!USE_REMOTE_API) return browserApi.createReceipt(data);
 		const payload = await requestJson('/api/receipts', {
 			method: 'POST',
 			body: JSON.stringify(data)
@@ -58,6 +66,7 @@ export const api = {
 		return payload.data;
 	},
 	async createEmi(data) {
+		if (!USE_REMOTE_API) return browserApi.createEmi(data);
 		const payload = await requestJson('/api/emis', {
 			method: 'POST',
 			body: JSON.stringify(data)
@@ -65,6 +74,7 @@ export const api = {
 		return payload.data;
 	},
 	async getReport() {
+		if (!USE_REMOTE_API) return browserApi.getReport();
 		const payload = await requestJson('/api/report');
 		return payload.data;
 	}
