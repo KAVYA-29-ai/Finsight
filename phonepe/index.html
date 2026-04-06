@@ -3,8 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL || '',
-        SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+    <title>PhonePe Wallet</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background-orb orb-a"></div>
     <div class="background-orb orb-b"></div>
     <main class="shell">
       <div class="phone-frame">
@@ -19,16 +22,6 @@
         <div id="app"></div>
       </div>
     </main>
-    <script type="module">
-      const legacyPhonepe = String(import.meta.env.PHONEPE_PORT || '').trim();
-      window.__APP_CONFIG__ = {
-        API_URL: import.meta.env.VITE_API_URL || '',
-        PHONEPE_API_URL:
-          import.meta.env.VITE_PHONEPE_API_URL ||
-          (legacyPhonepe.startsWith('http') ? legacyPhonepe : '') ||
-          ''
-      };
-    </script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
