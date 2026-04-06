@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "vite --port 5173",
     "build": "vite build",
-    "preview": "vite preview --port 4173"
+    "preview": "vite preview --port 4173",
+    "test": "node --test tests/vercel-ready.test.js"
   },
   "dependencies": {
-    "firebase": "^11.6.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

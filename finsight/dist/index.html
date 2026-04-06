@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FinSight Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" crossorigin src="/assets/index-B5Qt9EMX.js"></script>
+  </head>
+  <body>
+    <div class="money-float money-a">₹</div>
+    <div class="money-float money-b">₹</div>
+    <div class="money-float money-c">₹</div>
+    <div class="money-float money-d">₹</div>
+
+    <main class="shell">
+      <aside class="sidebar card">
+        <div>
+          <p class="eyebrow">FinSight</p>
+          <h1>AI finance demo</h1>
+          <p class="muted">A clean skeleton for budget tracking, AI score, and report export.</p>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="FinSight sections">
+          <button class="nav-item active" type="button" data-view="home">Home</button>
+          <button class="nav-item" type="button" data-view="track">Track</button>
+          <button class="nav-item" type="button" data-view="insights">AI Insights</button>
+          <button class="nav-item" type="button" data-view="marketplace">Marketplace</button>
+          <button class="nav-item" type="button" data-view="report">Report</button>
+        </nav>
+
+        <button id="refresh-dashboard" class="primary-btn" type="button">Refresh Data</button>
+      </aside>
+
+      <section class="content">
+        <section class="hero card" data-section="home">
+          <div>
+            <p class="eyebrow">Home</p>
+            <h2>Live Finance Control Room</h2>
+          </div>
+
+          <div class="stats-grid" id="top-stats">
+            <article class="stat-card card">
+              <span class="label">Total spent this month</span>
+              <strong id="stat-monthly-spent">₹0</strong>
+              <p class="muted" id="stat-usage">0% of your budget used.</p>
+            </article>
+
+            <article class="stat-card card">
+              <span class="label">AI Health score</span>
+              <div class="score-row">
+                <div class="score-ring" id="score-ring">
+                <strong id="score-value">84</strong>
+                </div>
+                <div>
+                  <p class="score-label" id="score-label">Risky</p>
+                  <p class="muted" id="score-caption">Health score placeholder</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="stat-card card">
+              <span class="label">Predicted next month spend</span>
+              <strong id="stat-predicted">₹0</strong>
+              <p class="muted" id="budget-left">Budget left: ₹0</p>
+            </article>
+
+            <article class="stat-card card">
+              <span class="label">Total spent today</span>
+              <strong id="stat-today-spent">₹0</strong>
+            </article>
+
+            <article class="stat-card card budget-editor-card">
+              <span class="label">Account bill</span>
+              <strong id="stat-budget-left">₹0</strong>
+              <div class="budget-editor">
+                <input id="budget-input" type="number" min="1" step="1" placeholder="200000" />
+                <button id="update-budget" class="primary-btn" type="button">Update Budget</button>
+              </div>
+              <p class="muted">Change here updates the account bill total.</p>
+            </article>
+
+            <article class="stat-card card">
+              <span class="label">Average daily spend</span>
+              <strong id="stat-avg-daily">₹0</strong>
+            </article>
+          </div>
+
+          <div id="critical-alert"></div>
+
+          <div class="chart-grid full-home-grid">
+            <article class="card panel">
+              <div class="section-head">
+                <h3>Category mix</h3>
+                <span class="pill">Monthly view</span>
+              </div>
+              <h4>Spending Pie Chart</h4>
+              <div class="donut-layout">
+                <div id="category-donut" class="donut"></div>
+                <div id="category-chart" class="legend-list"></div>
+              </div>
+            </article>
+
+            <article class="card panel">
+              <div class="section-head">
+                <h3>Weekly trend</h3>
+                <span class="pill">Last 7 days</span>
+              </div>
+              <h4>Daily Spend Line Chart</h4>
+              <div id="daily-chart" class="bars"></div>
+            </article>
+          </div>
+
+          <article class="card panel bill-panel">
+            <p class="eyebrow">Bill Scanner Simulator</p>
+            <h3>Upload Bill</h3>
+
+            <div class="scanner-grid">
+              <label class="field">
+                <span>Receipt file</span>
+                <input id="receipt-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" />
+              </label>
+              <div class="button-row">
+                <button id="parse-receipt" class="primary-btn" type="button">Parse Receipt</button>
+                <button id="upload-receipt" class="success-btn" type="button">Save Entry</button>
+              </div>
+
+              <label class="field">
+                <span>Bills file (CSV/PDF/Image)</span>
+                <input id="bills-file" type="file" accept=".csv,.txt,.pdf,.jpg,.jpeg,.png,.webp" />
+              </label>
+              <div class="button-row">
+                <button id="upload-bills" class="secondary-btn" type="button">Upload Bills File</button>
+              </div>
+
+              <div class="field">
+                <span>Merchant</span>
+                <input id="bill-merchant" type="text" placeholder="Zomato" />
+              </div>
+              <div class="field">
+                <span>Category</span>
+                <input id="bill-category" type="text" placeholder="Food" />
+              </div>
+              <div class="split-row">
+                <label class="field">
+                  <span>Amount</span>
+                  <input id="bill-amount" type="number" min="1" step="1" placeholder="499" />
+                </label>
+                <label class="field">
+                  <span>GST %</span>
+                  <input id="bill-gst" type="number" min="0" max="28" step="0.1" value="18" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Payment mode</span>
+                <select id="bill-transaction-type">
+                  <option value="upi">UPI</option>
+                  <option value="cash">Cash</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Entry action</span>
+                <select id="bill-entry-action">
+                  <option value="track_only">Track only</option>
+                  <option value="deduct_only">Deduct only</option>
+                  <option value="track_and_deduct">Track and deduct</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>GST Number</span>
+                <input id="bill-gst-number" type="text" placeholder="27ABCDE1234F1Z5" />
+              </label>
+
+              <button id="simulate-bill-scan" class="dark-btn" type="button">Simulate Bill Scan</button>
+              <div id="bill-result" class="muted"></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="card panel" data-section="insights">
+          <div class="section-head">
+            <h3>AI insights</h3>
+            <span class="pill" id="insights-health">Health: --</span>
+          </div>
+          <div id="insights-warning"></div>
+          <div id="future-alerts" class="list-stack"></div>
+          <div class="insight-hero card">
+            <div class="insight-hero-head">
+              <div>
+                <p class="eyebrow">Impact summary</p>
+                <h4>Need vs Want</h4>
+              </div>
+              <span class="pill" id="insights-impact">Balanced</span>
+            </div>
+            <div class="need-want-bars">
+              <div class="need-want-row">
+                <div class="need-want-labels">
+                  <strong>Needs</strong>
+                  <span id="needs-share">0%</span>
+                </div>
+                <div class="need-want-track"><div id="needs-bar" class="need-bar"></div></div>
+              </div>
+              <div class="need-want-row">
+                <div class="need-want-labels">
+                  <strong>Wants</strong>
+                  <span id="wants-share">0%</span>
+                </div>
+                <div class="need-want-track"><div id="wants-bar" class="want-bar"></div></div>
+              </div>
+            </div>
+            <div class="poll-row" id="need-want-poll">
+              <button class="poll-chip active" type="button" data-poll="need">Need</button>
+              <button class="poll-chip" type="button" data-poll="want">Want</button>
+              <button class="poll-chip" type="button" data-poll="balanced">Balanced</button>
+            </div>
+            <p class="muted" id="need-want-remark">Share balance will update automatically from your transactions.</p>
+          </div>
+          <ul id="insights-list" class="insight-list"></ul>
+        </section>
+
+        <section class="card panel" data-section="report">
+          <div class="section-head">
+            <h3>Report</h3>
+            <span class="pill">Weekly</span>
+          </div>
+          <div id="weekly-report" class="list-stack"></div>
+          <h4>Daily Spend Tracker</h4>
+          <div id="detailed-report" class="daily-report-wrap"></div>
+          <div class="button-row">
+            <button id="download-report" class="primary-btn" type="button">Download report</button>
+            <button id="download-csv" class="ghost-btn" type="button">Download CSV</button>
+          </div>
+        </section>
+
+        <section class="card panel" data-section="track">
+          <div class="section-head">
+            <h3>Track Expenses</h3>
+            <span class="pill">Receipt or Manual</span>
+          </div>
+
+          <article class="card">
+            <h4>📸 Receipt Upload</h4>
+            <p class="muted">Upload receipt image or PDF. Gemini will auto-detect amount & category.</p>
+            <div class="form-row">
+              <input id="receipt-file" type="file" accept="image/*,.pdf" placeholder="Choose receipt image or PDF" />
+              <button id="receipt-upload-btn" class="primary-btn" type="button">Upload & Parse</button>
+            </div>
+            <div id="receipt-parse-result" class="muted"></div>
+            <div id="receipt-form" style="display:none;">
+              <label>Merchant <input id="receipt-merchant" type="text" /></label>
+              <label>Amount ₹ <input id="receipt-amount" type="number" /></label>
+              <label>Category 
+                <select id="receipt-category">
+                  <option>Food</option>
+                  <option>Transport</option>
+                  <option>Shopping</option>
+                  <option>Entertainment</option>
+                  <option>Health</option>
+                  <option>Education</option>
+                  <option>Utilities</option>
+                  <option>Others</option>
+                </select>
+              </label>
+              <button id="receipt-save-btn" class="success-btn" type="button">Save Receipt</button>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

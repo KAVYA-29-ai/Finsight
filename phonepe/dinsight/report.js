@@ -62,7 +62,7 @@ function buildDailySeries(transactions, receipts, span = 7) {
 
 function buildReportText(summary) {
   const lines = [
-    'FinSight local report',
+    'FinSight report',
     `Generated: ${new Date(summary.generatedAt).toLocaleString('en-IN')}`,
     '',
     'Wallet',
@@ -92,7 +92,7 @@ function buildReportText(summary) {
 
 /**
  * Builds dashboard insights and a downloadable text report from the current app state.
- * @param {object} state - Local app state from SQLite.
+ * @param {object} state - App state snapshot.
  * @returns {{summary: object, suggestions: Array<object>, report: object}} Dashboard payload.
  */
 export function buildDashboardInsights(state) {

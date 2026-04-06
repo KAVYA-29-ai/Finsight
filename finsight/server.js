@@ -1,19 +1,26 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import 'dotenv/config';
-import { mergeSharedState, readCommonDataSnapshot, readSharedLedger, readSharedState, recordBudget, recordMarketplaceListing } from '../shared/common-sqlite.js';
-import { getSupabaseHealthSnapshot } from '../shared/supabase.js';
+import dotenv from 'dotenv';
+import {
+  getSupabaseAdminClient,
+  getSupabaseHealthSnapshot,
+  insertBudgetRecord,
+  insertMarketplaceListing,
+  isSupabaseConfigured,
+  listMarketplaceListings,
+  readLatestBudgetRecord,
+  readSupabaseCommonDataSnapshot
+} from '../shared/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 const publicDir = path.join(__dirname, 'public');
-const marketplaceDbPath = process.env.FINSIGHT_SQLITE_PATH || path.join(__dirname, 'finsight.db');
 const port = Number(process.env.FINSIGHT_PORT || process.env.PORT || 3001);
 const envPath = path.join(__dirname, '.env');
 const rootEnvPath = path.join(__dirname, '..', '.env');
-const marketplaceDb = new DatabaseSync(marketplaceDbPath);
 let monthlyBudget = 1000000000;
 let lastSeenTransactionCount = 0;
 const geminiCache = {
@@ -46,101 +53,6 @@ async function loadEnvFile() {
       // Optional env file.
     }
   }
-}
-
-function initializeMarketplaceSchema() {
-  marketplaceDb.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS marketplace_listings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      brand TEXT NOT NULL,
-      originalValue REAL NOT NULL,
-      askingPrice REAL NOT NULL,
-      platformFee REAL NOT NULL,
-      sellerNote TEXT,
-      expiry TEXT,
-      status TEXT NOT NULL DEFAULT 'active',
-      timestamp INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updatedAt INTEGER NOT NULL
-    );
-  `);
-}
-
-function getSetting(key) {
-  const row = marketplaceDb.prepare('SELECT value FROM app_settings WHERE key = ?').get(String(key));
-  return row ? String(row.value) : null;
-}
-
-function setSetting(key, value) {
-  marketplaceDb
-    .prepare(
-      'INSERT INTO app_settings (key, value, updatedAt) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt'
-    )
-    .run(String(key), String(value), Date.now());
-}
-
-function loadMonthlyBudgetFromDb(defaultBudget) {
-  const dbValue = Number(getSetting('monthly_budget'));
-  if (Number.isFinite(dbValue) && dbValue > 0) {
-    return dbValue;
-  }
-  setSetting('monthly_budget', defaultBudget);
-  return defaultBudget;
-}
-
-function insertMarketplaceListing({ type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry }) {
-  const result = marketplaceDb
-    .prepare(
-      'INSERT INTO marketplace_listings (type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry, status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry, 'active', Date.now());
-
-  const row = marketplaceDb
-    .prepare(
-      'SELECT id, type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry, status, timestamp FROM marketplace_listings WHERE id = ?'
-    )
-    .get(result.lastInsertRowid);
-
-  const snapshot = {
-    id: String(row.id),
-    type: String(row.type),
-    brand: String(row.brand),
-    originalValue: toRupeeNumber(Number(row.originalValue || 0)),
-    askingPrice: toRupeeNumber(Number(row.askingPrice || 0)),
-    platformFee: toRupeeNumber(Number(row.platformFee || 0)),
-    sellerNote: String(row.sellerNote || ''),
-    expiry: String(row.expiry || ''),
-    status: String(row.status || 'active'),
-    timestamp: Number(row.timestamp || Date.now())
-  };
-
-  return snapshot;
-}
-
-function listActiveMarketplaceListings() {
-  const rows = marketplaceDb
-    .prepare(
-      'SELECT id, type, brand, originalValue, askingPrice, platformFee, sellerNote, expiry, status, timestamp FROM marketplace_listings WHERE status = ? ORDER BY timestamp DESC'
-    )
-    .all('active');
-
-  return rows.map((row) => ({
-    id: String(row.id),
-    type: String(row.type),
-    brand: String(row.brand),
-    originalValue: toRupeeNumber(Number(row.originalValue || 0)),
-    askingPrice: toRupeeNumber(Number(row.askingPrice || 0)),
-    platformFee: toRupeeNumber(Number(row.platformFee || 0)),
-    sellerNote: String(row.sellerNote || ''),
-    expiry: String(row.expiry || ''),
-    status: String(row.status || 'active'),
-    timestamp: Number(row.timestamp || Date.now())
-  }));
 }
 
 function computePlatformFee(askingPrice) {
@@ -196,13 +108,7 @@ function sendJson(res, statusCode, payload) {
 }
 
 function syncCommonStateFromFinSight() {
-  return mergeSharedState(
-    {
-      monthlyBudget: toRupeeNumber(monthlyBudget),
-      lastFinsightSyncAt: Date.now()
-    },
-    'finsight'
-  );
+  return null;
 }
 
 function guessMerchantFromFilename(filename) {
@@ -260,10 +166,78 @@ function normalizeCategory(category) {
   return map.get(raw) || 'Others';
 }
 
-function inferNeedOrWant(category) {
+function inferNeedOrWant(category, merchant = '', explicit = '') {
+  const forced = String(explicit || '').trim().toLowerCase();
+  if (forced === 'need' || forced === 'want') {
+    return forced;
+  }
+
   const value = normalizeCategory(category);
+  const merchantText = String(merchant || '').toLowerCase();
   const needCategories = new Set(['Transport', 'Health', 'Education', 'Utilities']);
-  return needCategories.has(value) ? 'need' : 'want';
+  if (needCategories.has(value)) {
+    return 'need';
+  }
+
+  if (value === 'Food') {
+    const essentialFoodMarkers = ['mart', 'grocery', 'dairy', 'milk', 'vegetable', 'kirana', 'supermarket'];
+    if (essentialFoodMarkers.some((token) => merchantText.includes(token))) {
+      return 'need';
+    }
+  }
+
+  const essentialMerchantMarkers = ['hospital', 'pharmacy', 'medical', 'school', 'college', 'electricity', 'water bill', 'gas bill', 'metro', 'bus', 'uber', 'ola'];
+  if (essentialMerchantMarkers.some((token) => merchantText.includes(token))) {
+    return 'need';
+  }
+
+  return 'want';
+}
+
+function resolveNeedWantForEntry({
+  category,
+  merchant = '',
+  sourceType = '',
+  paymentMode = '',
+  explicit = ''
+}) {
+  const forced = String(explicit || '').trim().toLowerCase();
+  if (forced === 'need' || forced === 'want') {
+    return forced;
+  }
+
+  const normalizedCategory = normalizeCategory(category);
+  const merchantText = String(merchant || '').toLowerCase();
+  const source = String(sourceType || '').toLowerCase();
+  const mode = String(paymentMode || '').toLowerCase();
+
+  const alwaysNeedMerchant = ['hospital', 'medical', 'pharmacy', 'school', 'college', 'electricity', 'water bill', 'gas bill', 'metro', 'bus pass', 'insurance'];
+  if (alwaysNeedMerchant.some((token) => merchantText.includes(token))) {
+    return 'need';
+  }
+
+  const transportNeedMerchant = ['uber', 'ola', 'rapido', 'irctc', 'petrol', 'fuel', 'cng'];
+  if (transportNeedMerchant.some((token) => merchantText.includes(token))) {
+    return 'need';
+  }
+
+  const alwaysWantMerchant = ['swiggy', 'zomato', 'blinkit', 'zepto cafe', 'bookmyshow', 'netflix', 'prime video', 'hotstar'];
+  if (alwaysWantMerchant.some((token) => merchantText.includes(token))) {
+    return 'want';
+  }
+
+  if (normalizedCategory === 'Food') {
+    const groceryNeedMerchant = ['mart', 'grocery', 'kirana', 'supermarket', 'dairy', 'milk', 'vegetable'];
+    if (groceryNeedMerchant.some((token) => merchantText.includes(token))) {
+      return 'need';
+    }
+
+    if (mode === 'upi' && source === 'payment') {
+      return 'want';
+    }
+  }
+
+  return inferNeedOrWant(normalizedCategory, merchantText);
 }
 
 function normalizeEntryAction(entryAction, paymentMode) {
@@ -532,6 +506,7 @@ async function recordTrackedExpense({ merchant, amount, category, transactionTyp
       amount: toRupeeNumber(amount),
       category: normalizedCategory,
       type: mode,
+      needOrWant,
       gst: ''
     });
   }
@@ -930,7 +905,13 @@ async function fetchSharedState() {
       is_emi: 0,
       emi_months: 0,
       emi_status: 'active',
-      need_or_want: String(item.needOrWant || inferNeedOrWant(item.category)).toLowerCase(),
+      need_or_want: String(resolveNeedWantForEntry({
+        category: item.category,
+        merchant: item.name || item.custom_name || '',
+        sourceType: 'payment',
+        paymentMode: item.type === 'cash' ? 'cash' : 'upi',
+        explicit: item.needOrWant
+      })).toLowerCase(),
       timestamp_ms: Number(item.timestamp || Date.now())
     }));
 
@@ -945,7 +926,13 @@ async function fetchSharedState() {
       is_emi: 0,
       emi_months: 0,
       emi_status: 'active',
-      need_or_want: inferNeedOrWant(item.category),
+      need_or_want: String(resolveNeedWantForEntry({
+        category: item.category,
+        merchant: item.merchant || item.custom_name || '',
+        sourceType: String(item.source || 'cash-tracked'),
+        paymentMode: String(item.source || '') === 'upi-linked' ? 'upi' : 'cash',
+        explicit: item.needOrWant
+      })).toLowerCase(),
       timestamp_ms: Number(item.timestamp || Date.now())
     }));
 
@@ -966,6 +953,55 @@ async function fetchSharedState() {
       entries: []
     };
   }
+}
+
+async function reclassifyNeedWantHistory(limit = 1000) {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  const client = getSupabaseAdminClient();
+  const capped = Math.max(1, Math.trunc(limit));
+
+  const [txRes, receiptRes] = await Promise.all([
+    client.from('money_transactions').select('id,name,category,type,need_or_want').eq('source', 'phonepe').order('created_at', { ascending: false }).limit(capped),
+    client.from('receipts_history').select('id,merchant,category,entry_source').eq('source', 'phonepe').order('created_at', { ascending: false }).limit(capped)
+  ]);
+
+  if (txRes.error || receiptRes.error) {
+    throw new Error(txRes.error?.message || receiptRes.error?.message || 'Failed to read history rows for reclassification.');
+  }
+
+  let updatedTransactions = 0;
+  for (const row of txRes.data || []) {
+    const next = resolveNeedWantForEntry({
+      category: row.category,
+      merchant: row.name,
+      sourceType: 'payment',
+      paymentMode: row.type,
+      explicit: ''
+    });
+
+    if (String(row.need_or_want || '').toLowerCase() !== next) {
+      const { error } = await client.from('money_transactions').update({ need_or_want: next }).eq('id', row.id);
+      if (!error) {
+        updatedTransactions += 1;
+      }
+    }
+  }
+
+  // Some deployments do not have receipts_history.need_or_want column.
+  // Receipts are still classified at runtime in analytics snapshots.
+  const updatedReceipts = 0;
+
+  return {
+    scannedTransactions: (txRes.data || []).length,
+    scannedReceipts: (receiptRes.data || []).length,
+    updatedTransactions,
+    updatedReceipts,
+    receiptsPersistence: 'skipped-no-column',
+    totalUpdated: updatedTransactions + updatedReceipts
+  };
 }
 
 async function buildAnalyticsSnapshot() {
@@ -1216,10 +1252,7 @@ function buildTransactionsCsv(transactions) {
 }
 
 await loadEnvFile();
-initializeMarketplaceSchema();
-monthlyBudget = loadMonthlyBudgetFromDb(Number(process.env.FINSIGHT_BUDGET || 1000000000));
-recordBudget({ source: 'finsight', monthlyBudget, note: 'Startup budget load' });
-syncCommonStateFromFinSight();
+monthlyBudget = await readLatestBudgetRecord(Number(process.env.FINSIGHT_BUDGET || 1000000000));
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -1239,17 +1272,32 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/state') {
-    sendJson(res, 200, { ok: true, data: readSharedState() });
+    const snapshot = await readSupabaseCommonDataSnapshot();
+    if (!snapshot.connected) {
+      sendJson(res, 503, { ok: false, error: snapshot.message || 'Supabase is not configured.' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: snapshot.state });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/ledger') {
-    sendJson(res, 200, { ok: true, data: readSharedLedger() });
+    const snapshot = await readSupabaseCommonDataSnapshot();
+    if (!snapshot.connected) {
+      sendJson(res, 503, { ok: false, error: snapshot.message || 'Supabase is not configured.' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: snapshot.ledger });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/data') {
-    sendJson(res, 200, { ok: true, data: readCommonDataSnapshot() });
+    const supabaseSnapshot = await readSupabaseCommonDataSnapshot();
+    if (!supabaseSnapshot.connected) {
+      sendJson(res, 503, { ok: false, error: supabaseSnapshot.message || 'Supabase is not configured.' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: supabaseSnapshot });
     return;
   }
 
@@ -1260,14 +1308,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/common/state') {
-    try {
-      const body = await readJsonBody(req);
-      const patch = body && typeof body.patch === 'object' && body.patch ? body.patch : {};
-      const data = mergeSharedState(patch, body.updatedBy || 'finsight');
-      sendJson(res, 200, { ok: true, data });
-    } catch (error) {
-      sendJson(res, 400, { ok: false, error: error.message });
-    }
+    sendJson(res, 405, { ok: false, error: 'Direct common state mutation is disabled. Use domain APIs.' });
     return;
   }
 
@@ -1315,6 +1356,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/analytics/reclassify-need-want') {
+    try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, message: 'Supabase is not configured.' });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const limit = Number(body.limit || 1000);
+      const data = await reclassifyNeedWantHistory(limit);
+      sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      sendJson(res, 400, { ok: false, message: error.message });
+    }
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/analytics/weekly-report') {
     const snapshot = await buildAnalyticsSnapshot();
     sendJson(res, 200, snapshot.weeklyReport);
@@ -1347,6 +1404,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'PUT' && url.pathname === '/api/budget') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const nextLimit = Number(body.monthly_limit);
       if (!Number.isFinite(nextLimit) || nextLimit <= 0) {
@@ -1354,9 +1415,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       monthlyBudget = nextLimit;
-      setSetting('monthly_budget', monthlyBudget);
-      recordBudget({ source: 'finsight', monthlyBudget, note: 'Budget updated via API' });
-      syncCommonStateFromFinSight();
+      await insertBudgetRecord({ source: 'finsight', monthlyBudget, note: 'Budget updated via API' });
       sendJson(res, 200, {
         message: 'Budget updated',
         monthly_limit: toRupeeNumber(monthlyBudget)
@@ -1369,6 +1428,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/analytics/receipt-upload') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const geminiParsed = await extractReceiptWithGemini({
         filename: body.filename,
@@ -1413,6 +1476,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/analytics/receipt-upload-save') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const fallbackFilename = body.filename || 'manual-entry';
       const parsedFileKey = body.parsed_file_key || `${String(fallbackFilename).trim()}:${Number(body.file_size || 0)}`;
@@ -1437,7 +1504,7 @@ const server = http.createServer(async (req, res) => {
         : toRupeeNumber(amount * (gstRate / 100));
       const totalSaved = amountIsInclusive ? amount : toRupeeNumber(amount + gstAmount);
       const category = normalizeCategory(body.category || parsed?.category || autoCategory(merchant, totalSaved));
-      const needOrWant = inferNeedOrWant(category);
+      const needOrWant = inferNeedOrWant(category, merchant, body.need_or_want);
       const gstValidation = validateGst(body.gst_number || parsed?.gst_number || null);
 
       const recorded = await recordTrackedExpense({
@@ -1486,6 +1553,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/analytics/bills-csv-import') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const isCsv = String(body.filename || '').toLowerCase().endsWith('.csv') || String(body.filename || '').toLowerCase().endsWith('.txt');
       if (!isCsv) {
@@ -1570,6 +1641,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/analytics/bill-scan') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const amount = Number(body.amount || 0);
       if (!Number.isFinite(amount) || amount <= 0) {
@@ -1644,6 +1719,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/report-download') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       sendJson(res, 200, {
         ok: true,
@@ -1662,6 +1741,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/marketplace/list') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readJsonBody(req);
       const brand = String(body.brand || '').trim();
       const originalValue = toRupeeNumber(Number(body.originalValue || 0));
@@ -1691,18 +1774,7 @@ const server = http.createServer(async (req, res) => {
         sellerNote,
         expiry: String(body.expiry || '')
       };
-      const saved = insertMarketplaceListing(listing);
-      recordMarketplaceListing({
-        source: 'finsight',
-        type: saved.type,
-        brand: saved.brand,
-        originalValue: saved.originalValue,
-        askingPrice: saved.askingPrice,
-        platformFee: saved.platformFee,
-        sellerNote: saved.sellerNote,
-        expiry: saved.expiry,
-        status: saved.status
-      });
+      const saved = await insertMarketplaceListing({ source: 'finsight', ...listing, status: 'active' });
       sendJson(res, 201, { message: 'Listing created successfully', listing: saved });
     } catch (error) {
       sendJson(res, 400, { message: error.message });
@@ -1712,7 +1784,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/api/marketplace/listings') {
     try {
-      const active = listActiveMarketplaceListings();
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { message: 'Supabase is not configured.' });
+        return;
+      }
+      const active = await listMarketplaceListings();
       sendJson(res, 200, { listings: active });
     } catch (error) {
       sendJson(res, 400, { message: error.message });
@@ -1729,6 +1805,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`FinSight demo running at http://localhost:${port}`);
+  console.log(`FinSight app running at http://localhost:${port}`);
   console.log(`Gemini mode: ${process.env.GEMINI_API_KEY ? 'live' : 'fallback'}`);
 });

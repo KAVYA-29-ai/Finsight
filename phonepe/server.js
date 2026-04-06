@@ -2,12 +2,23 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import 'dotenv/config';
-import { addMoney, clearDemoData, createEmi, getState, reseedDemoData, storeReceipt, storeTransaction } from './db.js';
-import { mergeSharedState, readCommonDataSnapshot, readSharedLedger, readSharedState } from '../shared/common-sqlite.js';
-import { getSupabaseHealthSnapshot } from '../shared/supabase.js';
+import dotenv from 'dotenv';
+import {
+  getCurrentWalletState,
+  getSupabaseHealthSnapshot,
+  insertEmiRecord,
+  insertMoneyTransaction,
+  insertReceiptHistory,
+  insertWalletEvent,
+  isSupabaseConfigured,
+  readPhonepeStateSnapshot,
+  readSupabaseCommonDataSnapshot,
+  updateWalletBalance
+} from '../shared/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 const publicDir = path.join(__dirname, 'public');
 const port = Number(process.env.PHONEPE_PORT || process.env.PORT || 3000);
 
@@ -45,16 +56,70 @@ function sendText(res, statusCode, text, contentType = 'text/plain; charset=utf-
   res.end(text);
 }
 
-function syncCommonStateFromPhonePe() {
-  const state = getState();
-  return mergeSharedState(
-    {
+function normalizeTransactionMode(rawType) {
+  const value = String(rawType || '').trim().toLowerCase();
+  if (!value) return 'upi';
+
+  const cashLike = new Set(['cash']);
+  if (cashLike.has(value)) return 'cash';
+
+  const onlineLike = new Set(['upi', 'online', 'phonepe', 'gpay', 'paytm', 'netbanking', 'card']);
+  if (onlineLike.has(value)) return 'upi';
+
+  return 'upi';
+}
+
+function inferNeedOrWant({ category, name, explicit }) {
+  const normalizedExplicit = String(explicit || '').trim().toLowerCase();
+  if (normalizedExplicit === 'need' || normalizedExplicit === 'want') {
+    return normalizedExplicit;
+  }
+
+  const normalizedCategory = String(category || '').trim().toLowerCase();
+  const normalizedName = String(name || '').trim().toLowerCase();
+
+  const categoryNeeds = new Set(['utilities', 'groceries', 'health', 'transport', 'transportation', 'bills', 'education', 'rent']);
+  if (categoryNeeds.has(normalizedCategory)) {
+    return 'need';
+  }
+
+  const nameNeeds = ['hospital', 'medical', 'pharmacy', 'school', 'college', 'electricity', 'water bill', 'gas bill', 'metro', 'bus', 'uber', 'ola'];
+  if (nameNeeds.some((token) => normalizedName.includes(token))) {
+    return 'need';
+  }
+
+  return 'want';
+}
+
+function buildReportFromState(state) {
+  const transactions = Array.isArray(state.transactions) ? state.transactions : [];
+  const receipts = Array.isArray(state.receipts) ? state.receipts : [];
+  const needSpend = transactions.filter((row) => row.needOrWant === 'need').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const wantSpend = transactions.filter((row) => row.needOrWant === 'want').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const topCategory = Object.entries(state.categoryTotals || {}).sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))[0]?.[0] || null;
+
+  return {
+    summary: {
+      generatedAt: Date.now(),
       walletBalance: Number(state.wallet?.balance || 0),
-      lastPhonepeTransactionCount: Number((state.transactions || []).length),
-      lastPhonepeSyncAt: Date.now()
+      transactionSpend: Number(state.monthlySpent || 0),
+      upiSpend: transactions.filter((row) => String(row.type || '').toLowerCase() === 'upi').reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      receiptSpend: Number(state.trackedReceiptSpent || 0),
+      trackedSpend: Number(state.combinedMonthlySpent || 0),
+      needSpend,
+      wantSpend,
+      receiptCount: receipts.length,
+      topCategory,
+      dailySeries: [],
+      suggestions: []
     },
-    'phonepe'
-  );
+    suggestions: [],
+    report: {
+      filename: `finsight-report-${Date.now()}.txt`,
+      generatedAt: Date.now(),
+      text: 'Report generated from Supabase transaction and receipt history.'
+    }
+  };
 }
 
 /**
@@ -104,22 +169,38 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
   if (req.method === 'GET' && url.pathname === '/api/state') {
-    sendJson(res, 200, { ok: true, data: getState() });
+    const data = await readPhonepeStateSnapshot();
+    sendJson(res, 200, { ok: true, data });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/state') {
-    sendJson(res, 200, { ok: true, data: readSharedState() });
+    const snapshot = await readSupabaseCommonDataSnapshot();
+    if (!snapshot.connected) {
+      sendJson(res, 503, { ok: false, error: snapshot.message || 'Supabase is not configured.' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: snapshot.state });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/ledger') {
-    sendJson(res, 200, { ok: true, data: readSharedLedger() });
+    const snapshot = await readSupabaseCommonDataSnapshot();
+    if (!snapshot.connected) {
+      sendJson(res, 503, { ok: false, error: snapshot.message || 'Supabase is not configured.' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, data: snapshot.ledger });
     return;
   }
 
   if (req.method === 'GET' && url.pathname === '/api/common/data') {
-    sendJson(res, 200, { ok: true, data: readCommonDataSnapshot() });
+      const supabaseSnapshot = await readSupabaseCommonDataSnapshot();
+      if (!supabaseSnapshot.connected) {
+        sendJson(res, 503, { ok: false, error: supabaseSnapshot.message || 'Supabase is not configured.' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, data: supabaseSnapshot });
     return;
   }
 
@@ -130,23 +211,27 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/common/state') {
-    try {
-      const body = await readBody(req);
-      const patch = body && typeof body.patch === 'object' && body.patch ? body.patch : {};
-      const data = mergeSharedState(patch, body.updatedBy || 'phonepe');
-      sendJson(res, 200, { ok: true, data });
-    } catch (error) {
-      sendJson(res, 400, { ok: false, error: error.message });
-    }
+    sendJson(res, 405, { ok: false, error: 'Direct common state mutation is disabled. Use domain APIs.' });
     return;
   }
 
   if (req.method === 'POST' && url.pathname === '/api/wallet/add') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, error: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readBody(req);
-      const wallet = addMoney(body.amount);
-      syncCommonStateFromPhonePe();
-      sendJson(res, 200, { ok: true, wallet, data: getState() });
+      const amount = Number(body.amount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Amount must be a positive number.');
+      }
+      const current = await getCurrentWalletState();
+      const nextBalance = Number(current.balance || 0) + amount;
+      const wallet = await updateWalletBalance(nextBalance);
+      await insertWalletEvent({ source: 'phonepe', eventType: 'topup', amount, balance: nextBalance, note: 'Wallet top-up' });
+      const data = await readPhonepeStateSnapshot();
+      sendJson(res, 200, { ok: true, wallet, data });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -155,10 +240,51 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/transactions') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, error: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readBody(req);
-      const transaction = storeTransaction(body, true);
-      syncCommonStateFromPhonePe();
-      sendJson(res, 200, { ok: true, transaction, data: getState() });
+      const amount = Number(body.amount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Amount must be a positive number.');
+      }
+
+      const transactionRow = await insertMoneyTransaction({
+        source: 'phonepe',
+        kind: 'payment',
+        name: body.name || 'Transaction',
+        amount,
+        category: body.category || 'Others',
+        type: normalizeTransactionMode(body.type),
+        needOrWant: inferNeedOrWant({
+          category: body.category,
+          name: body.name,
+          explicit: body.needOrWant
+        }),
+        gst: body.gst || '',
+        note: body.note || ''
+      });
+
+      const current = await getCurrentWalletState();
+      const nextBalance = Number(current.balance || 0) - amount;
+      await updateWalletBalance(nextBalance);
+      await insertWalletEvent({ source: 'phonepe', eventType: 'spend', amount: -amount, balance: nextBalance, note: `Transaction: ${body.name || 'Transaction'}` });
+      const data = await readPhonepeStateSnapshot();
+      sendJson(res, 200, {
+        ok: true,
+        transaction: {
+          id: transactionRow.id,
+          name: transactionRow.name,
+          amount: Number(transactionRow.amount || 0),
+          category: transactionRow.category,
+          type: transactionRow.type,
+          needOrWant: transactionRow.need_or_want,
+          gst: transactionRow.gst || '',
+          timestamp: transactionRow.created_at ? new Date(transactionRow.created_at).getTime() : Date.now()
+        },
+        data
+      });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -167,10 +293,41 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/receipts') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, error: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readBody(req);
-      const receipt = storeReceipt(body);
-      syncCommonStateFromPhonePe();
-      sendJson(res, 200, { ok: true, receipt, data: getState() });
+      const amount = Number(body.amount || 0);
+      if (!Number.isFinite(amount) || amount < 0) {
+        throw new Error('Amount must be a valid number.');
+      }
+      const receiptRow = await insertReceiptHistory({
+        source: 'phonepe',
+        merchant: body.merchant || body.name || 'Unknown Merchant',
+        amount,
+        category: body.category || 'Others',
+        note: body.note || '',
+        entrySource: body.source || 'manual',
+        fileName: body.fileName || '',
+        fileType: body.fileType || ''
+      });
+      const data = await readPhonepeStateSnapshot();
+      sendJson(res, 200, {
+        ok: true,
+        receipt: {
+          id: receiptRow.id,
+          merchant: receiptRow.merchant,
+          amount: Number(receiptRow.amount || 0),
+          category: receiptRow.category,
+          note: receiptRow.note || '',
+          source: receiptRow.entry_source || 'manual',
+          fileName: receiptRow.file_name || '',
+          fileType: receiptRow.file_type || '',
+          timestamp: receiptRow.created_at ? new Date(receiptRow.created_at).getTime() : Date.now()
+        },
+        data
+      });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -179,10 +336,36 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/emis') {
     try {
+      if (!isSupabaseConfigured()) {
+        sendJson(res, 503, { ok: false, error: 'Supabase is not configured.' });
+        return;
+      }
       const body = await readBody(req);
-      const emi = createEmi(body);
-      syncCommonStateFromPhonePe();
-      sendJson(res, 200, { ok: true, emi, data: getState() });
+      const amount = Number(body.amount || 0);
+      const dueDate = Number(body.dueDate || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('EMI amount must be positive.');
+      }
+      if (!Number.isFinite(dueDate) || dueDate <= 0) {
+        throw new Error('EMI dueDate is required.');
+      }
+      const emiRow = await insertEmiRecord({
+        source: 'phonepe',
+        name: body.name || 'EMI',
+        amount,
+        dueDate
+      });
+      const data = await readPhonepeStateSnapshot();
+      sendJson(res, 200, {
+        ok: true,
+        emi: {
+          id: emiRow.id,
+          name: emiRow.name,
+          amount: Number(emiRow.amount || 0),
+          dueDate: Number(emiRow.due_date || dueDate)
+        },
+        data
+      });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -190,22 +373,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/report') {
-    const report = getState().dashboard;
+    if (!isSupabaseConfigured()) {
+      sendJson(res, 503, { ok: false, error: 'Supabase is not configured.' });
+      return;
+    }
+    const state = await readPhonepeStateSnapshot();
+    const report = buildReportFromState(state);
     sendJson(res, 200, { ok: true, data: report });
-    return;
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/admin/reset') {
-    const state = clearDemoData();
-    syncCommonStateFromPhonePe();
-    sendJson(res, 200, { ok: true, data: state });
-    return;
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/admin/reseed') {
-    const state = reseedDemoData();
-    syncCommonStateFromPhonePe();
-    sendJson(res, 200, { ok: true, data: state });
     return;
   }
 
@@ -218,6 +392,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  syncCommonStateFromPhonePe();
-  console.log(`PhonePe local app running at http://localhost:${port}`);
+  console.log(`PhonePe app running at http://localhost:${port}`);
 });

@@ -1,33 +1,18 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { buildDashboardInsights } from './dinsight/report.js';
+import { isSupabaseConfigured } from '../shared/supabase.js';
 import { recordEmiHistory, recordMoneyTransaction, recordReceiptHistory, recordWalletEvent } from '../shared/common-sqlite.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.PHONEPE_DB_PATH || path.join(__dirname, 'phonepe.db');
+dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const dbPath = ':memory:';
 const db = new DatabaseSync(dbPath);
 
 export const CATEGORIES = ['Food', 'Transport', 'Shopping', 'Entertainment', 'Health', 'Education', 'Utilities', 'Others'];
-
-const SAMPLE_TRANSACTIONS = [
-  { name: 'Swiggy', amount: 800, category: 'Food', type: 'upi', needOrWant: 'want', gst: '', timestamp: Date.now() - 1000 * 60 * 60 * 24 },
-  { name: 'Metro Card Recharge', amount: 120, category: 'Transport', type: 'upi', needOrWant: 'need', gst: '', timestamp: Date.now() - 1000 * 60 * 60 * 24 * 2 },
-  { name: 'Apollo Pharmacy', amount: 450, category: 'Health', type: 'cash', needOrWant: 'need', gst: '27AABCU9603R1ZV', timestamp: Date.now() - 1000 * 60 * 60 * 24 * 3 },
-  { name: 'Amazon', amount: 1500, category: 'Shopping', type: 'upi', needOrWant: 'want', gst: '', timestamp: Date.now() - 1000 * 60 * 60 * 24 * 4 },
-  { name: 'Netflix', amount: 649, category: 'Entertainment', type: 'cash', needOrWant: 'want', gst: '', timestamp: Date.now() - 1000 * 60 * 60 * 24 * 5 }
-];
-
-const SAMPLE_EMIS = [
-  { name: 'Phone EMI', amount: 2500, dueDate: 6 },
-  { name: 'Laptop EMI', amount: 3200, dueDate: 12 }
-];
-
-const SAMPLE_RECEIPTS = [
-  { merchant: 'Fuel Station', amount: 780, category: 'Transport', note: 'Cash receipt upload', source: 'upload', fileName: 'fuel-receipt.pdf', fileType: 'application/pdf', timestamp: Date.now() - 1000 * 60 * 60 * 6 },
-  { merchant: 'Office Lunch', amount: 240, category: 'Food', note: 'Manual entry saved from dinner receipt', source: 'manual', fileName: '', fileType: '', timestamp: Date.now() - 1000 * 60 * 60 * 10 }
-];
 
 const WANT_CATEGORY_SET = new Set(['Food', 'Shopping', 'Entertainment', 'Others']);
 const NEED_CATEGORY_SET = new Set(['Transport', 'Health', 'Education', 'Utilities']);
@@ -111,15 +96,11 @@ function inferNeedOrWant(transaction) {
 }
 
 /**
- * Creates the SQLite schema required by the PhonePe local demo.
+ * Creates the SQLite schema required by the PhonePe app state.
  */
 function createSchema() {
   db.exec(`
     PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS app_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS wallet (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       balance INTEGER NOT NULL,
@@ -155,67 +136,13 @@ function createSchema() {
   `);
 }
 
-function getMetaValue(key) {
-  const row = db.prepare('SELECT value FROM app_meta WHERE key = ?').get(key);
-  return row ? row.value : null;
-}
-
-function setMetaValue(key, value) {
-  db.prepare('INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));
-}
-
-/**
- * Seeds default wallet, EMI, and transaction data when the database is empty.
- */
-function ensureSeedData() {
-  if (getMetaValue('manual_reset') === '1') {
+function ensureBaseData() {
+  if (!isSupabaseConfigured()) {
     return;
   }
-
   const wallet = db.prepare('SELECT balance FROM wallet WHERE id = 1').get();
   if (!wallet) {
-    db.prepare('INSERT INTO wallet (id, balance, updatedAt) VALUES (1, ?, ?)').run(47580, now());
-  }
-
-  const emiCount = db.prepare('SELECT COUNT(*) AS count FROM emis').get().count;
-  if (emiCount === 0) {
-    const insertEmi = db.prepare('INSERT INTO emis (name, amount, dueDate) VALUES (?, ?, ?)');
-    for (const emi of SAMPLE_EMIS) {
-      insertEmi.run(emi.name, emi.amount, emi.dueDate);
-    }
-  }
-
-  const transactionCount = db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count;
-  if (transactionCount === 0) {
-    const insertTransaction = db.prepare('INSERT INTO transactions (name, amount, category, type, needOrWant, gst, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    for (const transaction of SAMPLE_TRANSACTIONS) {
-      insertTransaction.run(
-        transaction.name,
-        transaction.amount,
-        transaction.category,
-        transaction.type,
-        transaction.needOrWant,
-        transaction.gst,
-        transaction.timestamp
-      );
-    }
-  }
-
-  const receiptCount = db.prepare('SELECT COUNT(*) AS count FROM receipts').get().count;
-  if (receiptCount === 0) {
-    const insertReceipt = db.prepare('INSERT INTO receipts (merchant, amount, category, note, source, fileName, fileType, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    for (const receipt of SAMPLE_RECEIPTS) {
-      insertReceipt.run(
-        receipt.merchant,
-        receipt.amount,
-        receipt.category,
-        receipt.note,
-        receipt.source,
-        receipt.fileName,
-        receipt.fileType,
-        receipt.timestamp
-      );
-    }
+    db.prepare('INSERT INTO wallet (id, balance, updatedAt) VALUES (1, ?, ?)').run(0, now());
   }
 }
 
@@ -232,19 +159,16 @@ function clearDemoData() {
     db.prepare('INSERT INTO wallet (id, balance, updatedAt) VALUES (1, ?, ?)').run(0, now());
   }
 
-  setMetaValue('manual_reset', '1');
   db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   return getState();
 }
 
 function reseedDemoData() {
-  setMetaValue('manual_reset', '0');
-  ensureSeedData();
-  return getState();
+  return clearDemoData();
 }
 
 createSchema();
-ensureSeedData();
+ensureBaseData();
 
 function getWalletRow() {
   return db.prepare('SELECT balance, updatedAt FROM wallet WHERE id = 1').get();
@@ -281,6 +205,10 @@ function getEmis() {
  * @returns {object} The inserted transaction row.
  */
 function storeTransaction(transaction, affectWallet = true) {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is required for PhonePe writes.');
+  }
+
   const amount = Number(transaction.amount);
   const name = String(transaction.name || '').trim();
   const category = String(transaction.category || '').trim();
@@ -335,11 +263,15 @@ function storeTransaction(transaction, affectWallet = true) {
 }
 
 /**
- * Adds funds to the local wallet.
+ * Adds funds to the wallet.
  * @param {number|string} amount - Amount to add.
  * @returns {{balance: number, updatedAt: number}} Updated wallet row.
  */
 function addMoney(amount) {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is required for PhonePe writes.');
+  }
+
   const parsedAmount = Number(amount);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     throw new Error('Top up amount must be positive.');
@@ -356,6 +288,10 @@ function addMoney(amount) {
  * @returns {object} Inserted EMI row.
  */
 function createEmi(emi) {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is required for PhonePe writes.');
+  }
+
   const name = String(emi.name || '').trim();
   const amount = Number(emi.amount);
   const dueDate = Number(emi.dueDate);
@@ -383,6 +319,10 @@ function createEmi(emi) {
  * @returns {object} Inserted receipt row.
  */
 function storeReceipt(receipt) {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is required for PhonePe writes.');
+  }
+
   const merchant = String(receipt.merchant || '').trim();
   const amount = Number(receipt.amount);
   const category = String(receipt.category || '').trim();
@@ -433,6 +373,37 @@ function storeReceipt(receipt) {
  * @returns {object} Wallet, transaction, EMI, and summary data.
  */
 export function getState() {
+  if (!isSupabaseConfigured()) {
+    const emptyWallet = { balance: 0, updatedAt: now() };
+    const emptyDashboard = buildDashboardInsights({
+      wallet: emptyWallet,
+      transactions: [],
+      receipts: [],
+      emis: [],
+      categoryTotals: Object.fromEntries(CATEGORIES.map((category) => [category, 0])),
+      monthlySpent: 0
+    });
+
+    return {
+      source: {
+        connected: false,
+        message: 'Supabase not configured'
+      },
+      wallet: emptyWallet,
+      transactions: [],
+      recentTransactions: [],
+      receipts: [],
+      recentReceipts: [],
+      emis: [],
+      categoryTotals: Object.fromEntries(CATEGORIES.map((category) => [category, 0])),
+      monthlySpent: 0,
+      trackedReceiptSpent: 0,
+      combinedMonthlySpent: 0,
+      dashboard: emptyDashboard,
+      updatedAt: now()
+    };
+  }
+
   const wallet = getWalletRow();
   const transactions = getTransactions();
   const receipts = getReceipts();

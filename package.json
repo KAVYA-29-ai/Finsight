@@ -12,15 +12,14 @@
     "dev:finsight": "npm run dev -w finsight",
     "finsight": "npm run dev:finsight",
     "build": "npm run build -w phonepe && npm run build -w finsight",
-    "seed:firebase": "node scripts/firebase-seed.mjs",
-    "check:firebase": "node scripts/firebase-query-check.mjs",
+    "test": "npm run test -w phonepe && npm run test -w finsight",
+    "supabase:seed": "psql \"$SUPABASE_DB_URL\" -f scripts/supabase/schema_and_seed.sql",
     "supabase:sql": "cat scripts/supabase/schema_and_seed.sql",
     "supabase:health": "node -e \"import('./shared/supabase.js').then(async (m)=>{console.log(await m.getSupabaseHealthSnapshot());}).catch((e)=>{console.error(e.message);process.exit(1);});\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
-    "dotenv": "^16.4.7",
-    "firebase-admin": "^12.7.0"
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

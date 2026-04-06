@@ -409,7 +409,7 @@ async function updateBudget() {
 }
 
 async function parseReceipt() {
-  const file = document.querySelector('#receipt-file').files?.[0];
+  const file = document.querySelector('#bill-receipt-file')?.files?.[0];
   if (!file) {
     throw new Error('Choose a receipt file first');
   }
@@ -435,9 +435,10 @@ async function parseReceipt() {
 }
 
 async function uploadReceiptAndSave() {
-  const file = document.querySelector('#receipt-file').files?.[0];
+  const file = document.querySelector('#bill-receipt-file')?.files?.[0];
   const merchant = document.querySelector('#bill-merchant').value || null;
   const amount = optionalNumberFromInput('#bill-amount');
+  const billGstRate = optionalNumberFromInput('#bill-gst');
 
   if (!file && (!merchant || !Number.isFinite(amount) || amount <= 0)) {
     throw new Error('For manual entry fill merchant and amount, or choose a receipt file');
@@ -453,7 +454,7 @@ async function uploadReceiptAndSave() {
     merchant_hint: merchant,
     amount,
     category: document.querySelector('#bill-category').value || null,
-    gst_number: document.querySelector('#bill-gst-number').value || null,
+    gst_numberbillGstRate ?? 0l,
     gst_rate: Number(document.querySelector('#bill-gst').value || '18'),
     amount_is_inclusive: true,
     transaction_type: document.querySelector('#bill-transaction-type').value,
@@ -478,7 +479,7 @@ async function uploadBillsFile() {
     filename: file.name,
     file_text: text,
     file_size: file.size,
-    merchant_hint: document.querySelector('#bill-merchant').value || null,
+    merchant_hoptionalNumberFromInput('#bill-gst') ?? 0ll,
     gst_rate: Number(document.querySelector('#bill-gst').value || '18'),
     transaction_type: document.querySelector('#bill-transaction-type').value,
     entry_action: document.querySelector('#bill-entry-action').value
@@ -492,7 +493,7 @@ async function simulateBillScan() {
   const payload = await apiSend('/api/analytics/bill-scan', 'POST', {
     merchant_name: document.querySelector('#bill-merchant').value || 'Unknown Merchant',
     category: document.querySelector('#bill-category').value || 'Others',
-    amount: optionalNumberFromInput('#bill-amount') || 0,
+    amount: opoptionalNumberFromInput('#bill-gst') ?? 0
     gst_rate: Number(document.querySelector('#bill-gst').value || '18'),
     gst_number: document.querySelector('#bill-gst-number').value || null,
     notes: 'Simulated from homepage scanner',
@@ -548,6 +549,7 @@ async function handleReceiptSave() {
   const amountInput = optionalNumberFromInput('#receipt-amount');
   const category = document.querySelector('#receipt-category')?.value || null;
   const gstNumber = document.querySelector('#receipt-gst')?.value || null;
+  const gstRate = optionalNumberFromInput('#receipt-gst-rate');
   const parsedFileKey = merchantInput?.dataset?.parsedFileKey || null;
   const merchant = merchantInput?.value?.trim() || null;
 
@@ -566,7 +568,7 @@ async function handleReceiptSave() {
     amount: amountInput,
     category,
     gst_number: gstNumber,
-    gst_rate: 18,
+    gst_rate: gstRate ?? 0,
     amount_is_inclusive: true,
     transaction_type: 'cash',
     entry_action: 'track_only',
@@ -585,6 +587,8 @@ async function handleManualEntry() {
   const category = document.querySelector('#manual-category')?.value || 'Others';
   const type = document.querySelector('#manual-type')?.value || 'cash';
   const needOrWant = document.querySelector('#manual-need-want')?.value || 'want';
+  const manualGstNumber = String(document.querySelector('#manual-gst-number')?.value || '').trim() || null;
+  const manualGstRate = optionalNumberFromInput('#manual-gst-rate');
 
   if (!merchant || !Number.isFinite(amount) || amount <= 0) {
     throw new Error('Enter valid manual entry details');
@@ -596,8 +600,8 @@ async function handleManualEntry() {
     merchant_hint: merchant,
     amount,
     category,
-    gst_number: null,
-    gst_rate: 0,
+    gst_number: manualGstNumber,
+    gst_rate: manualGstRate ?? 0,
     amount_is_inclusive: true,
     transaction_type: type,
     entry_action: type === 'upi' ? 'track_and_deduct' : 'track_only',

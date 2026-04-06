@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import 'dotenv/config';
+import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.SHARED_DB_PATH || path.join(__dirname, 'common.db');
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const dbPath = ':memory:';
 const db = new DatabaseSync(dbPath);
 
 const DEFAULT_SHARED_STATE = {

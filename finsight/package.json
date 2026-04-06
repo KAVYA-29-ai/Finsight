@@ -5,11 +5,11 @@
   "scripts": {
     "dev": "vite --port 5174",
     "build": "vite build",
-    "preview": "vite preview --port 4174"
+    "preview": "vite preview --port 4174",
+    "test": "node --test tests/vercel-ready.test.js"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
-    "firebase": "^11.6.1",
     "jspdf": "^4.2.1",
     "react": "^19.1.1",
     "react-chartjs-2": "^5.3.0",
