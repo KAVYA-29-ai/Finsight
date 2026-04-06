@@ -1254,7 +1254,7 @@ function buildTransactionsCsv(transactions) {
 await loadEnvFile();
 monthlyBudget = await readLatestBudgetRecord(Number(process.env.FINSIGHT_BUDGET || 1000000000));
 
-const server = http.createServer(async (req, res) => {
+export async function handleRequest(req, res) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   
   // CORS headers - allow frontend from different domain to call this API
@@ -1814,9 +1814,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   sendText(res, 405, 'Method not allowed');
-});
+}
 
-server.listen(port, () => {
-  console.log(`FinSight app running at http://localhost:${port}`);
-  console.log(`Gemini mode: ${process.env.GEMINI_API_KEY ? 'live' : 'fallback'}`);
-});
+const server = http.createServer(handleRequest);
+
+if (process.env.VERCEL !== '1') {
+  server.listen(port, () => {
+    console.log(`FinSight app running at http://localhost:${port}`);
+    console.log(`Gemini mode: ${process.env.GEMINI_API_KEY ? 'live' : 'fallback'}`);
+  });
+}

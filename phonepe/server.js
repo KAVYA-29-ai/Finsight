@@ -165,7 +165,7 @@ async function serveStatic(res, pathname) {
     sendText(res, 404, 'Not found');
   }
 }
-const server = http.createServer(async (req, res) => {
+export async function handleRequest(req, res) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   
   // CORS headers for frontend on different domain
@@ -401,8 +401,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   sendText(res, 405, 'Method not allowed');
-});
+}
 
-server.listen(port, () => {
-  console.log(`PhonePe app running at http://localhost:${port}`);
-});
+const server = http.createServer(handleRequest);
+
+if (process.env.VERCEL !== '1') {
+  server.listen(port, () => {
+    console.log(`PhonePe app running at http://localhost:${port}`);
+  });
+}
