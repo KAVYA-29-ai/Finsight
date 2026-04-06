@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PhonePe Local Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="background-orb orb-a"></div>
+    <div class="background-orb orb-b"></div>
+    <main class="shell">
+      <div class="phone-frame">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">PhonePe Simulator</p>
+            <h1>Local wallet + SQLite</h1>
+          </div>
+          <button id="refresh-btn" class="ghost-btn" type="button">Refresh</button>
+        </header>
+        <div id="status" class="status-banner">Connected to local <span>.db</span></div>
+        <div id="app"></div>
+      </div>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "finsight2-phonepe-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node phonepe/server.js",
+    "dev": "node phonepe/server.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
