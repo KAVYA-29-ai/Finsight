@@ -270,9 +270,13 @@
       </section>
     </main>
     <script type="module">
+      const legacyFinsight = String(import.meta.env.FINSIGHT_PORT || '').trim();
       window.__APP_CONFIG__ = {
         API_URL: import.meta.env.VITE_API_URL || '',
-        FINSIGHT_API_URL: import.meta.env.VITE_FINSIGHT_API_URL || ''
+        FINSIGHT_API_URL:
+          import.meta.env.VITE_FINSIGHT_API_URL ||
+          (legacyFinsight.startsWith('http') ? legacyFinsight : '') ||
+          ''
       };
     </script>
     <script type="module" src="/app.js"></script>
