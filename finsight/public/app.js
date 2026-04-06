@@ -19,7 +19,17 @@ const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || 
 // Runtime API base URL injected from index.html; empty means same-origin (/api) for local proxy.
 const apiBase = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.FINSIGHT_API_URL) || '';
 
+function assertApiConfigured() {
+  if (typeof window === 'undefined') return;
+  const host = String(window.location.hostname || '').toLowerCase();
+  const isHosted = host.includes('vercel.app');
+  if (isHosted && !apiBase) {
+    throw new Error('Backend API URL missing. Set VITE_FINSIGHT_API_URL in Vercel to your deployed backend URL.');
+  }
+}
+
 function apiUrl(path) {
+  assertApiConfigured();
   if (!path.startsWith('/')) return path;
   if (apiBase && !path.startsWith('http')) return `${apiBase}${path}`;
   return path;

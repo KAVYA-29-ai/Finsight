@@ -9,7 +9,17 @@ const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || 
 // Runtime API base URL injected from index.html; empty means same-origin (/api) for local proxy.
 const API_BASE = sanitizeConfigValue(runtimeConfig.API_URL) || sanitizeConfigValue(runtimeConfig.PHONEPE_API_URL) || '';
 
+function assertApiConfigured() {
+  if (typeof window === 'undefined') return;
+  const host = String(window.location.hostname || '').toLowerCase();
+  const isHosted = host.includes('vercel.app');
+  if (isHosted && !API_BASE) {
+    throw new Error('Backend API URL missing. Set VITE_PHONEPE_API_URL in Vercel to your deployed backend URL.');
+  }
+}
+
 async function requestJson(url, options = {}) {
+  assertApiConfigured();
   const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
   const response = await fetch(fullUrl, {
     headers: {
