@@ -574,7 +574,10 @@ async function handleReceiptUpload() {
     merchantInput.value = payload.merchant_name || '';
     merchantInput.dataset.parsedFileKey = payload.parsed_file_key || '';
   }
-  if (amountInput) amountInput.value = Math.round(payload.estimated_amount || 0);
+  if (amountInput) {
+    const parsedAmount = Number(payload.estimated_amount || 0);
+    amountInput.value = parsedAmount > 0 ? String(Math.round(parsedAmount)) : '';
+  }
   if (categoryInput && payload.category) categoryInput.value = payload.category;
   if (gstInput) gstInput.value = payload.gst_number || '';
   if (form) form.style.display = '';

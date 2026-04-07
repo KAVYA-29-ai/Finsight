@@ -68,8 +68,9 @@ function inferNeedOrWant(category, merchant = '', explicit = '') {
 }
 
 function estimateAmountFromFileSize(fileSize, filename) {
-  const kb = Math.max(Number(fileSize || 0) / 1024, 1);
-  return toMoney(Math.min(25000, 120 + kb * 3.2));
+  // File-size based estimates are often wildly inaccurate for receipts.
+  // Return 0 so UI can ask user for manual input instead of saving wrong values.
+  return 0;
 }
 
 function parseAmountValue(input) {
