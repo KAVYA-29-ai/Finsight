@@ -368,6 +368,51 @@ async function callGeminiText(prompt, fallbackText, extraParts = []) {
   return fallbackText;
 }
 
+function parseJsonFromModelText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Try object slice fallback.
+  }
+
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(raw.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractLabeledAmountFromText(text) {
+  const raw = String(text || '');
+  if (!raw) return NaN;
+
+  const patterns = [
+    /(receipt\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
+    /(grand\s*total)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
+    /(total\s*amount|total\s*paid|amount\s*paid|net\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi
+  ];
+
+  const hits = [];
+  for (const regex of patterns) {
+    let match;
+    while ((match = regex.exec(raw)) !== null) {
+      const value = parseAmountValue(match[2]);
+      if (isPlausibleReceiptAmount(value)) hits.push(value);
+    }
+  }
+
+  if (!hits.length) return NaN;
+  return hits[hits.length - 1];
+}
+
 async function buildSnapshot() {
   const [walletRows, budgetRows, txRows, receiptRows, marketRows] = await Promise.all([
     selectRows('wallet_state', { order: 'id.asc', limit: 1 }),
@@ -585,7 +630,7 @@ async function parseReceiptPayload(body) {
     gst_number: String(body.gst_number || '').toUpperCase().trim() || null,
     gst_rate: toMoney(Number(body.gst_rate || 18)),
     parsed_file_key: `${String(body.filename || 'receipt')}:${Number(body.file_size || 0)}:${Date.now()}`,
-    message: 'Receipt parsed successfully.'
+    message: 'Receipt parsed. Review fields before saving.'
   };
 
   const fallbackText = JSON.stringify({
@@ -622,10 +667,8 @@ async function parseReceiptPayload(body) {
   const usedGemini = hasGeminiConfig() && aiText !== fallbackText;
 
   try {
-    const start = aiText.indexOf('{');
-    const end = aiText.lastIndexOf('}');
-    if (start !== -1 && end > start) {
-      const json = JSON.parse(aiText.slice(start, end + 1));
+    const json = parseJsonFromModelText(aiText);
+    if (json) {
       parsed.merchant_name = String(json.merchant_name || parsed.merchant_name).trim();
       parsed.estimated_amount = chooseReceiptAmountFromAi(json, fallbackAmount);
       parsed.category = normalizeCategory(json.category || parsed.category);
@@ -641,9 +684,19 @@ async function parseReceiptPayload(body) {
       } else {
         parsed.message = 'Receipt parsed with fallback estimate. Check Gemini API key/config for exact extraction.';
       }
+    } else if (usedGemini) {
+      const extractedAmount = extractLabeledAmountFromText(aiText);
+      if (isPlausibleReceiptAmount(extractedAmount)) {
+        parsed.estimated_amount = toMoney(extractedAmount);
+      }
+      parsed.message = parsed.estimated_amount > 0
+        ? 'Receipt parsed with Gemini text fallback.'
+        : 'Gemini responded, but amount could not be read. Please enter amount manually.';
     }
   } catch {
-    // Keep fallback parse.
+    if (usedGemini) {
+      parsed.message = 'Gemini response parse failed. Please review and enter amount manually.';
+    }
   }
 
   receiptParseCache.set(parsed.parsed_file_key, parsed);
