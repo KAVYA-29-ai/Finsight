@@ -96,6 +96,11 @@ function looksLikeYear(value) {
   return Number.isInteger(n) && n >= 1900 && n <= 2100;
 }
 
+function hasGeminiConfig() {
+  const key = String(runtimeConfig.GEMINI_API_KEY || '').trim();
+  return Boolean(key && !key.includes('%VITE_'));
+}
+
 function guessMerchantFromFilename(filename) {
   const base = String(filename || '').replaceAll(/[_-]+/g, ' ').replaceAll(/\.[^.]+$/g, '').trim();
   return base ? base.slice(0, 50) : 'Unknown Merchant';
@@ -535,14 +540,15 @@ async function parseReceiptPayload(body) {
   if (body.file_base64) {
     const mimeType = String(body.mime_type || '').trim() || 'image/jpeg';
     extraParts.push({
-      inline_data: {
-        mime_type: mimeType,
+      inlineData: {
+        mimeType,
         data: String(body.file_base64)
       }
     });
   }
 
   const aiText = await callGeminiText(prompt, fallbackText, extraParts);
+  const usedGemini = hasGeminiConfig() && aiText !== fallbackText;
 
   try {
     const start = aiText.indexOf('{');
@@ -560,7 +566,7 @@ async function parseReceiptPayload(body) {
       parsed.gst_number = String(json.gst_number || parsed.gst_number || '').toUpperCase().trim() || null;
       const parsedGstRate = parseAmountValue(json.gst_rate);
       parsed.gst_rate = toMoney(Number.isFinite(parsedGstRate) && parsedGstRate >= 0 ? parsedGstRate : (parsed.gst_rate || 18));
-      parsed.message = 'Receipt parsed with Gemini.';
+      parsed.message = usedGemini ? 'Receipt parsed with Gemini.' : 'Receipt parsed with fallback estimate. Check Gemini API key/config for exact extraction.';
     }
   } catch {
     // Keep fallback parse.
