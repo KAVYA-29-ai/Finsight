@@ -830,40 +830,23 @@ async function recordExpense(body) {
 }
 
 async function buildInsights(snapshot) {
-  const fallbackTips = [
-    'Keep daily spending below your budget pace to improve score.',
-    'Review top two categories and set a weekly cap.',
-    'Tag each transaction as need or want for cleaner planning.'
-  ];
-
   const needsShare = snapshot.needsShare;
   const wantsShare = snapshot.wantsShare;
   const topCategories = snapshot.categories.slice(0, 3).map((row) => `${row.category}: ${row.total}`).join(', ');
 
-  const aiText = await callGeminiText(
-    `You are a finance coach. Give 3 short tips in plain text for this profile. Needs ${needsShare}%, Wants ${wantsShare}%. Top categories: ${topCategories}.`,
-    fallbackTips.join('\n')
-  );
-
-  const tips = aiText
-    .split(/\n+/)
-    .map((line) => line.replace(/^[-*\d.\s]+/, '').trim())
-    .filter(Boolean)
-    .slice(0, 4);
-
-  const warning = wantsShare >= 60
-    ? 'Wants are above 60%. Consider a 7-day no-impulse challenge.'
-    : '';
-
-  return {
-    health_score: snapshot.health.score,
-    needs_share: needsShare,
-    wants_share: wantsShare,
-    warning,
-    tips: tips.length ? tips : fallbackTips,
+  const fallbackInsights = {
+    warning: wantsShare >= 60 ? 'Wants are above 60%. Consider a 7-day no-impulse challenge.' : '',
+    tips: [
+      'Keep daily spending below your budget pace to improve score.',
+      'Review top two categories and set a weekly cap.',
+      'Tag each transaction as need or want for cleaner planning.'
+    ],
     need_want_insight: wantsShare >= 60
       ? 'High wants ratio detected. Reducing food delivery by 3 orders/week can materially improve savings.'
       : 'Need-vs-want split is controlled. Maintain this ratio for better monthly consistency.',
+    critical_points: snapshot.health.critical ? ['Today crossed 1.5x daily budget.', 'Immediate reduction in discretionary spends advised.'] : [],
+    future_opportunities: ['Shift recurring spends to planned windows.', 'Track cash spends daily to avoid hidden leaks.'],
+    investment_suggestion: 'Route 10% of month-end surplus into a low-risk index SIP.',
     future_alerts: [
       {
         priority: snapshot.health.critical ? 'Critical' : 'Medium',
@@ -875,10 +858,64 @@ async function buildInsights(snapshot) {
         title: 'Budget runway',
         message: `Budget left this month is ₹${new Intl.NumberFormat('en-IN').format(toMoney(snapshot.totals.budget_left))}.`
       }
-    ],
-    critical_points: snapshot.health.critical ? ['Today crossed 1.5x daily budget.', 'Immediate reduction in discretionary spends advised.'] : [],
-    future_opportunities: ['Shift recurring spends to planned windows.', 'Track cash spends daily to avoid hidden leaks.'],
-    investment_suggestion: 'Route 10% of month-end surplus into a low-risk index SIP.'
+    ]
+  };
+
+  const prompt = [
+    'You are a practical personal finance coach for Indian users.',
+    'Return ONLY a JSON object with keys:',
+    '{"warning":string,"tips":string[],"need_want_insight":string,"critical_points":string[],"future_opportunities":string[],"investment_suggestion":string,"future_alerts":[{"priority":"Critical|Medium|Low|Future|Invest","title":string,"message":string}]}',
+    'Rules:',
+    '- Keep each tip actionable and under 100 chars.',
+    '- Avoid generic advice, use the metrics provided.',
+    '- Use rupee values only when helpful.',
+    '- Return max 4 tips and max 3 future_alerts.',
+    `Health score: ${snapshot.health.score}`,
+    `Needs share: ${needsShare}%`,
+    `Wants share: ${wantsShare}%`,
+    `Monthly spent: ${toMoney(snapshot.totals.monthly_spent)}`,
+    `Budget left: ${toMoney(snapshot.totals.budget_left)}`,
+    `Average daily spend: ${toMoney(snapshot.totals.average_daily_spend)}`,
+    `Top categories: ${topCategories || 'NA'}`
+  ].join('\n');
+
+  const aiText = await callGeminiText(prompt, JSON.stringify(fallbackInsights));
+  const aiJson = parseJsonFromModelText(aiText) || {};
+
+  const tips = Array.isArray(aiJson.tips)
+    ? aiJson.tips.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+    : fallbackInsights.tips;
+
+  const criticalPoints = Array.isArray(aiJson.critical_points)
+    ? aiJson.critical_points.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3)
+    : fallbackInsights.critical_points;
+
+  const futureOpportunities = Array.isArray(aiJson.future_opportunities)
+    ? aiJson.future_opportunities.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3)
+    : fallbackInsights.future_opportunities;
+
+  const futureAlerts = Array.isArray(aiJson.future_alerts)
+    ? aiJson.future_alerts
+      .map((item) => ({
+        priority: String(item?.priority || '').trim() || 'Medium',
+        title: String(item?.title || '').trim(),
+        message: String(item?.message || '').trim()
+      }))
+      .filter((item) => item.title && item.message)
+      .slice(0, 3)
+    : fallbackInsights.future_alerts;
+
+  return {
+    health_score: snapshot.health.score,
+    needs_share: needsShare,
+    wants_share: wantsShare,
+    warning: String(aiJson.warning || fallbackInsights.warning).trim(),
+    tips: tips.length ? tips : fallbackInsights.tips,
+    need_want_insight: String(aiJson.need_want_insight || fallbackInsights.need_want_insight).trim(),
+    future_alerts: futureAlerts.length ? futureAlerts : fallbackInsights.future_alerts,
+    critical_points: criticalPoints,
+    future_opportunities: futureOpportunities,
+    investment_suggestion: String(aiJson.investment_suggestion || fallbackInsights.investment_suggestion).trim()
   };
 }
 
