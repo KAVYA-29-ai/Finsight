@@ -9,6 +9,16 @@ function sanitizeConfigValue(value) {
     .replace(/\/$/, '');
 }
 
+function sanitizeSecretValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.includes('%VITE_')) return '';
+  return raw.replace(/^['\"]|['\"]$/g, '');
+}
+
+function getGeminiKey() {
+  return sanitizeSecretValue(runtimeConfig.GEMINI_API_KEY);
+}
+
 function toMoney(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return 0;
@@ -123,8 +133,7 @@ function chooseReceiptAmountFromAi(json, fallbackAmount) {
 }
 
 function hasGeminiConfig() {
-  const key = String(runtimeConfig.GEMINI_API_KEY || '').trim();
-  return Boolean(key && !key.includes('%VITE_'));
+  return Boolean(getGeminiKey());
 }
 
 function guessMerchantFromFilename(filename) {
@@ -280,9 +289,9 @@ function buildDailySeries(entries, days = 7) {
 }
 
 async function callGeminiText(prompt, fallbackText, extraParts = []) {
-  const key = String(runtimeConfig.GEMINI_API_KEY || '').trim();
+  const key = getGeminiKey();
   const model = String(runtimeConfig.GEMINI_MODEL || '').trim() || 'gemini-1.5-flash';
-  if (!key || key.includes('%VITE_')) {
+  if (!key) {
     return fallbackText;
   }
 

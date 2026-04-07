@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FinSight Demo</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script>
+      window.__APP_CONFIG__ = {
+        API_URL: '',
+        FINSIGHT_API_URL: '',
+        SUPABASE_URL: '%VITE_SUPABASE_URL%',
+        SUPABASE_ANON_KEY: '%VITE_SUPABASE_ANON_KEY%',
+        GEMINI_API_KEY: '%VITE_GEMINI_API_KEY%',
+        GEMINI_MODEL: '%VITE_GEMINI_MODEL%'
+      };
+    </script>
   </head>
   <body>
     <div class="money-float money-a">₹</div>
