@@ -26,13 +26,26 @@ function normalizeCategory(value) {
   if (!raw) return 'Others';
   const map = new Map([
     ['food', 'Food'],
+    ['grocery', 'Food'],
+    ['groceries', 'Food'],
+    ['restaurant', 'Food'],
+    ['dining', 'Food'],
     ['transport', 'Transport'],
     ['travel', 'Transport'],
+    ['fuel', 'Transport'],
+    ['petrol', 'Transport'],
     ['shopping', 'Shopping'],
     ['entertainment', 'Entertainment'],
     ['health', 'Health'],
+    ['medical', 'Health'],
     ['education', 'Education'],
     ['utilities', 'Utilities'],
+    ['utility', 'Utilities'],
+    ['bill', 'Utilities'],
+    ['tax', 'Utilities'],
+    ['property tax', 'Utilities'],
+    ['electricity', 'Utilities'],
+    ['water', 'Utilities'],
     ['rent', 'Utilities'],
     ['others', 'Others']
   ]);
@@ -55,15 +68,32 @@ function inferNeedOrWant(category, merchant = '', explicit = '') {
 }
 
 function estimateAmountFromFileSize(fileSize, filename) {
-  const amountMatch = String(filename || '').match(/(\d{2,6})/);
-  if (amountMatch) {
-    const value = Number(amountMatch[1]);
-    if (value >= 10 && value <= 200000) {
-      return value;
-    }
-  }
   const kb = Math.max(Number(fileSize || 0) / 1024, 1);
   return toMoney(Math.min(25000, 120 + kb * 3.2));
+}
+
+function parseAmountValue(input) {
+  if (typeof input === 'number') {
+    return Number.isFinite(input) ? input : NaN;
+  }
+  const raw = String(input || '').trim();
+  if (!raw) return NaN;
+
+  // Keep only the first decimal number-like token after removing currency markers.
+  const normalized = raw
+    .replace(/[₹,]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\bINR\b/gi, '')
+    .trim();
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return NaN;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function looksLikeYear(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1900 && n <= 2100;
 }
 
 function guessMerchantFromFilename(filename) {
@@ -218,18 +248,25 @@ function buildDailySeries(entries, days = 7) {
   return out;
 }
 
-async function callGeminiText(prompt, fallbackText) {
+async function callGeminiText(prompt, fallbackText, extraParts = []) {
   const key = String(runtimeConfig.GEMINI_API_KEY || '').trim();
   const model = String(runtimeConfig.GEMINI_MODEL || '').trim() || 'gemini-1.5-flash';
   if (!key || key.includes('%VITE_')) {
     return fallbackText;
   }
 
+  const parts = [{ text: prompt }];
+  for (const part of extraParts) {
+    if (part && typeof part === 'object') {
+      parts.push(part);
+    }
+  }
+
   const body = {
     contents: [
       {
         role: 'user',
-        parts: [{ text: prompt }]
+        parts
       }
     ],
     generationConfig: {
@@ -466,9 +503,10 @@ function buildCsvFromEntries(entries) {
 }
 
 async function parseReceiptPayload(body) {
+  const fallbackAmount = toMoney(estimateAmountFromFileSize(body.file_size, body.filename));
   const parsed = {
     merchant_name: String(body.merchant_hint || '').trim() || guessMerchantFromFilename(body.filename),
-    estimated_amount: toMoney(estimateAmountFromFileSize(body.file_size, body.filename)),
+    estimated_amount: fallbackAmount,
     category: normalizeCategory(body.category || 'Others'),
     gst_number: String(body.gst_number || '').toUpperCase().trim() || null,
     gst_rate: toMoney(Number(body.gst_rate || 18)),
@@ -484,10 +522,27 @@ async function parseReceiptPayload(body) {
     gst_rate: parsed.gst_rate
   });
 
-  const aiText = await callGeminiText(
-    `Extract receipt details as JSON with fields merchant_name, amount, category, gst_number, gst_rate.\nFilename: ${body.filename || 'unknown'}\nReturn only JSON.`,
-    fallbackText
-  );
+  const prompt = [
+    'Extract receipt details as strict JSON with fields:',
+    'merchant_name (string), amount (number), category (one of Food, Transport, Shopping, Entertainment, Health, Education, Utilities, Others), gst_number (string|null), gst_rate (number).',
+    'Use the final payable amount or grand total from the receipt.',
+    'Never use date/year/time/invoice/receipt numbers as amount.',
+    `Filename: ${body.filename || 'unknown'}`,
+    'Return only JSON object.'
+  ].join('\n');
+
+  const extraParts = [];
+  if (body.file_base64) {
+    const mimeType = String(body.mime_type || '').trim() || 'image/jpeg';
+    extraParts.push({
+      inline_data: {
+        mime_type: mimeType,
+        data: String(body.file_base64)
+      }
+    });
+  }
+
+  const aiText = await callGeminiText(prompt, fallbackText, extraParts);
 
   try {
     const start = aiText.indexOf('{');
@@ -495,10 +550,16 @@ async function parseReceiptPayload(body) {
     if (start !== -1 && end > start) {
       const json = JSON.parse(aiText.slice(start, end + 1));
       parsed.merchant_name = String(json.merchant_name || parsed.merchant_name).trim();
-      parsed.estimated_amount = toMoney(Number(json.amount || parsed.estimated_amount));
+      const aiAmount = parseAmountValue(json.amount);
+      if (Number.isFinite(aiAmount) && aiAmount > 0 && !looksLikeYear(aiAmount)) {
+        parsed.estimated_amount = toMoney(aiAmount);
+      } else {
+        parsed.estimated_amount = fallbackAmount;
+      }
       parsed.category = normalizeCategory(json.category || parsed.category);
       parsed.gst_number = String(json.gst_number || parsed.gst_number || '').toUpperCase().trim() || null;
-      parsed.gst_rate = toMoney(Number(json.gst_rate || parsed.gst_rate || 18));
+      const parsedGstRate = parseAmountValue(json.gst_rate);
+      parsed.gst_rate = toMoney(Number.isFinite(parsedGstRate) && parsedGstRate >= 0 ? parsedGstRate : (parsed.gst_rate || 18));
       parsed.message = 'Receipt parsed with Gemini.';
     }
   } catch {
