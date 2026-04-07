@@ -1,5 +1,6 @@
 const runtimeConfig = typeof window !== 'undefined' ? (window.__APP_CONFIG__ || {}) : {};
 const receiptParseCache = new Map();
+let lastGeminiError = '';
 
 function sanitizeConfigValue(value) {
   const raw = String(value || '').trim();
@@ -17,6 +18,13 @@ function sanitizeSecretValue(value) {
 
 function getGeminiKey() {
   return sanitizeSecretValue(runtimeConfig.GEMINI_API_KEY);
+}
+
+function getGeminiModelCandidates() {
+  const configured = String(runtimeConfig.GEMINI_MODEL || '').trim();
+  const preferred = configured || 'gemini-1.5-flash';
+  const defaults = [preferred, 'gemini-1.5-flash-8b', 'gemini-1.5-flash'];
+  return [...new Set(defaults.map((model) => String(model || '').trim()).filter(Boolean))];
 }
 
 function toMoney(value) {
@@ -290,10 +298,12 @@ function buildDailySeries(entries, days = 7) {
 
 async function callGeminiText(prompt, fallbackText, extraParts = []) {
   const key = getGeminiKey();
-  const model = String(runtimeConfig.GEMINI_MODEL || '').trim() || 'gemini-1.5-flash';
   if (!key) {
+    lastGeminiError = 'Gemini API key missing in runtime config.';
     return fallbackText;
   }
+
+  const models = getGeminiModelCandidates();
 
   const parts = [{ text: prompt }];
   for (const part of extraParts) {
@@ -316,22 +326,35 @@ async function callGeminiText(prompt, fallbackText, extraParts = []) {
     }
   };
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }
-  );
+  for (const model of models) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    );
 
-  if (!response.ok) {
-    return fallbackText;
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (response.status === 429) {
+        lastGeminiError = 'Gemini rate limit/quota exceeded (429).';
+        continue;
+      }
+      lastGeminiError = `Gemini request failed (${response.status}). ${errorText.slice(0, 160)}`;
+      continue;
+    }
+
+    const payload = await response.json();
+    const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n')?.trim();
+    if (text) {
+      lastGeminiError = '';
+      return text;
+    }
   }
 
-  const payload = await response.json();
-  const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n')?.trim();
-  return text || fallbackText;
+  return fallbackText;
 }
 
 async function buildSnapshot() {
@@ -598,7 +621,15 @@ async function parseReceiptPayload(body) {
       parsed.gst_number = String(json.gst_number || parsed.gst_number || '').toUpperCase().trim() || null;
       const parsedGstRate = parseAmountValue(json.gst_rate);
       parsed.gst_rate = toMoney(Number.isFinite(parsedGstRate) && parsedGstRate >= 0 ? parsedGstRate : (parsed.gst_rate || 18));
-      parsed.message = usedGemini ? 'Receipt parsed with Gemini.' : 'Receipt parsed with fallback estimate. Check Gemini API key/config for exact extraction.';
+      if (usedGemini) {
+        parsed.message = 'Receipt parsed with Gemini.';
+      } else if (lastGeminiError.includes('429')) {
+        parsed.message = 'Gemini quota/rate limit hit (429). Please retry in 1-2 min or use a key with active billing.';
+      } else if (lastGeminiError) {
+        parsed.message = `Receipt parsed with fallback. ${lastGeminiError}`;
+      } else {
+        parsed.message = 'Receipt parsed with fallback estimate. Check Gemini API key/config for exact extraction.';
+      }
     }
   } catch {
     // Keep fallback parse.
