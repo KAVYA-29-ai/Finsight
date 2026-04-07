@@ -132,18 +132,37 @@ function isPlausibleReceiptAmount(value) {
 }
 
 function chooseReceiptAmountFromAi(json, fallbackAmount) {
-  const priorityFields = ['receipt_amount', 'grand_total', 'total_amount', 'amount'];
+  // Priority order — most reliable fields first
+  const priorityFields = [
+    'receipt_amount',
+    'grand_total',
+    'total_amount',
+    'amount_paid',
+    'net_payable',
+    'amount',
+    'total'
+  ];
+
   for (const field of priorityFields) {
-    const value = parseAmountValue(json?.[field]);
+    const raw = json?.[field];
+    if (raw === null || raw === undefined) continue;
+    const value = parseAmountValue(raw);
     if (isPlausibleReceiptAmount(value)) return toMoney(value);
   }
 
+  // Check amount_candidates array
   const candidateList = Array.isArray(json?.amount_candidates) ? json.amount_candidates : [];
   for (const item of candidateList) {
     const value = parseAmountValue(item?.value ?? item);
     const label = String(item?.label || '').toLowerCase();
     if (!isPlausibleReceiptAmount(value)) continue;
-    if (label.includes('receipt amount') || label.includes('grand total') || label.includes('total paid') || label.includes('total')) {
+    if (
+      label.includes('receipt amount') ||
+      label.includes('grand total') ||
+      label.includes('total paid') ||
+      label.includes('amount paid') ||
+      label.includes('total')
+    ) {
       return toMoney(value);
     }
   }
@@ -394,23 +413,36 @@ function extractLabeledAmountFromText(text) {
   const raw = String(text || '');
   if (!raw) return NaN;
 
+  // Priority patterns — most specific first
   const patterns = [
-    /(receipt\s*amount|paid\s*amount|payment\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
-    /(grand\s*total|net\s*total|total\s*payable|net\s*payable|amount\s*due|final\s*amount)[^\d]{0,50}([\d,]+(?:\.\d{1,2})?)/gi,
-    /(total\s*amount|total\s*paid|amount\s*paid|net\s*amount|\btotal\b)[^\d]{0,24}([\d,]+(?:\.\d{1,2})?)/gi
+    // "amount": 1230  or  "amount":1230.00
+    /"(?:receipt_amount|grand_total|total_amount|amount_paid|amount)"\s*:\s*([\d,]+(?:\.\d{1,2})?)/gi,
+    // Receipt Amount : ₹1,230.00
+    /receipt\s*amount[^₹\d]{0,20}[₹Rs.\s]*([\d,]+(?:\.\d{1,2})?)/gi,
+    // Grand Total : 538.32
+    /grand\s*total[^₹\d]{0,20}[₹Rs.\s]*([\d,]+(?:\.\d{1,2})?)/gi,
+    // Total Amount Paid / Total Paid / Amount Paid / Net Payable
+    /(?:total\s*amount\s*paid|total\s*paid|amount\s*paid|net\s*payable|total\s*payable)[^₹\d]{0,20}[₹Rs.\s]*([\d,]+(?:\.\d{1,2})?)/gi,
+    // Total: 538
+    /\btotal\b[^₹\d]{0,15}[₹Rs.\s]*([\d,]+(?:\.\d{1,2})?)/gi
   ];
 
   const hits = [];
   for (const regex of patterns) {
     let match;
     while ((match = regex.exec(raw)) !== null) {
-      const value = parseAmountValue(match[2]);
-      if (isPlausibleReceiptAmount(value)) hits.push(value);
+      const value = parseAmountValue(match[1]);
+      if (isPlausibleReceiptAmount(value)) {
+        hits.push({ value, priority: patterns.indexOf(regex) });
+      }
     }
   }
 
   if (!hits.length) return NaN;
-  return hits[hits.length - 1];
+
+  // Return highest priority (lowest index) hit
+  hits.sort((a, b) => a.priority - b.priority);
+  return hits[0].value;
 }
 
 async function buildSnapshot() {
@@ -642,14 +674,27 @@ async function parseReceiptPayload(body) {
   });
 
   const prompt = [
-    'Extract receipt details as strict JSON with fields:',
-    'merchant_name (string), amount (number), receipt_amount (number|null), grand_total (number|null), total_amount (number|null), amount_candidates (array), category (one of Food, Transport, Shopping, Entertainment, Health, Education, Utilities, Others), gst_number (string|null), gst_rate (number).',
-    'For amount selection, ONLY use final payable value labeled like Receipt Amount, Grand Total, Total Amount, Total Paid.',
-    'Do NOT use bill no, CMC no, transaction no, annual value, tax slab, date, time, phone number, address numbers, or reference IDs as amount.',
-    'If multiple totals are present, choose the final payable/receipt amount actually paid by customer.',
-    'If unsure, set amount as null and still return JSON.',
-    `Filename: ${body.filename || 'unknown'}`,
-    'Return only JSON object.'
+    'You are a receipt parser. Extract key details from this receipt.',
+    'Return ONLY a valid JSON object - no markdown, no explanation, no code blocks.',
+    'Use exactly these fields:',
+    '{',
+    '  "merchant_name": "string - shop/brand name",',
+    '  "amount": number - THE SINGLE FINAL AMOUNT PAID (no text, no currency symbol, just digits like 538.32),',
+    '  "receipt_amount": number - same as amount,',
+    '  "grand_total": number - same as amount,',
+    '  "category": "one of: Food, Transport, Shopping, Entertainment, Health, Education, Utilities, Others",',
+    '  "gst_number": "string or null",',
+    '  "gst_rate": number',
+    '}',
+    '',
+    'CRITICAL RULES for amount:',
+    '- Use the FINAL total actually paid by customer.',
+    '- Labels to look for: Receipt Amount, Grand Total, Total Amount Paid, Total Paid, Net Payable, Amount Paid.',
+    '- amount MUST be a plain number. Example: 538.32 not "Rs.538" not "538.32 with symbol".',
+    '- Do NOT use: Bill No, Transaction No, Phone No, CMC No, Annual Value, date, year, or reference IDs.',
+    '- If you see 1230 as "Receipt Amount: 1,230.00" then amount = 1230.',
+    '- If multiple totals exist, pick the one labeled as actually paid/receipt amount.',
+    `Filename hint: ${body.filename || 'receipt'}`
   ].join('\n');
 
   const extraParts = [];
