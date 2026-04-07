@@ -20,11 +20,22 @@ function getGeminiKey() {
   return sanitizeSecretValue(runtimeConfig.GEMINI_API_KEY);
 }
 
+function normalizeGeminiModelName(model) {
+  const raw = sanitizeSecretValue(model);
+  if (!raw) return '';
+  return raw.replace(/^models\//i, '').trim();
+}
+
 function getGeminiModelCandidates() {
-  const configured = String(runtimeConfig.GEMINI_MODEL || '').trim();
-  const preferred = configured || 'gemini-1.5-flash';
-  const defaults = [preferred, 'gemini-1.5-flash-8b', 'gemini-1.5-flash'];
-  return [...new Set(defaults.map((model) => String(model || '').trim()).filter(Boolean))];
+  const configured = normalizeGeminiModelName(runtimeConfig.GEMINI_MODEL);
+  const defaults = [
+    configured,
+    'gemini-3-flash-preview',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite'
+  ];
+  return [...new Set(defaults.map((model) => normalizeGeminiModelName(model)).filter(Boolean))];
 }
 
 function toMoney(value) {
