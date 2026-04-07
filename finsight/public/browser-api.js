@@ -97,6 +97,31 @@ function looksLikeYear(value) {
   return Number.isInteger(n) && n >= 1900 && n <= 2100;
 }
 
+function isPlausibleReceiptAmount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 && n <= 200000 && !looksLikeYear(n);
+}
+
+function chooseReceiptAmountFromAi(json, fallbackAmount) {
+  const priorityFields = ['receipt_amount', 'grand_total', 'total_amount', 'amount'];
+  for (const field of priorityFields) {
+    const value = parseAmountValue(json?.[field]);
+    if (isPlausibleReceiptAmount(value)) return toMoney(value);
+  }
+
+  const candidateList = Array.isArray(json?.amount_candidates) ? json.amount_candidates : [];
+  for (const item of candidateList) {
+    const value = parseAmountValue(item?.value ?? item);
+    const label = String(item?.label || '').toLowerCase();
+    if (!isPlausibleReceiptAmount(value)) continue;
+    if (label.includes('receipt amount') || label.includes('grand total') || label.includes('total paid') || label.includes('total')) {
+      return toMoney(value);
+    }
+  }
+
+  return toMoney(fallbackAmount);
+}
+
 function hasGeminiConfig() {
   const key = String(runtimeConfig.GEMINI_API_KEY || '').trim();
   return Boolean(key && !key.includes('%VITE_'));
@@ -530,9 +555,11 @@ async function parseReceiptPayload(body) {
 
   const prompt = [
     'Extract receipt details as strict JSON with fields:',
-    'merchant_name (string), amount (number), category (one of Food, Transport, Shopping, Entertainment, Health, Education, Utilities, Others), gst_number (string|null), gst_rate (number).',
-    'Use the final payable amount or grand total from the receipt.',
-    'Never use date/year/time/invoice/receipt numbers as amount.',
+    'merchant_name (string), amount (number), receipt_amount (number|null), grand_total (number|null), total_amount (number|null), amount_candidates (array), category (one of Food, Transport, Shopping, Entertainment, Health, Education, Utilities, Others), gst_number (string|null), gst_rate (number).',
+    'For amount selection, ONLY use final payable value labeled like Receipt Amount, Grand Total, Total Amount, Total Paid.',
+    'Do NOT use bill no, CMC no, transaction no, annual value, tax slab, date, time, phone number, address numbers, or reference IDs as amount.',
+    'If multiple totals are present, choose the final payable/receipt amount actually paid by customer.',
+    'If unsure, set amount as null and still return JSON.',
     `Filename: ${body.filename || 'unknown'}`,
     'Return only JSON object.'
   ].join('\n');
@@ -557,12 +584,7 @@ async function parseReceiptPayload(body) {
     if (start !== -1 && end > start) {
       const json = JSON.parse(aiText.slice(start, end + 1));
       parsed.merchant_name = String(json.merchant_name || parsed.merchant_name).trim();
-      const aiAmount = parseAmountValue(json.amount);
-      if (Number.isFinite(aiAmount) && aiAmount > 0 && !looksLikeYear(aiAmount)) {
-        parsed.estimated_amount = toMoney(aiAmount);
-      } else {
-        parsed.estimated_amount = fallbackAmount;
-      }
+      parsed.estimated_amount = chooseReceiptAmountFromAi(json, fallbackAmount);
       parsed.category = normalizeCategory(json.category || parsed.category);
       parsed.gst_number = String(json.gst_number || parsed.gst_number || '').toUpperCase().trim() || null;
       const parsedGstRate = parseAmountValue(json.gst_rate);
