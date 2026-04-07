@@ -395,9 +395,9 @@ function extractLabeledAmountFromText(text) {
   if (!raw) return NaN;
 
   const patterns = [
-    /(receipt\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
-    /(grand\s*total)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
-    /(total\s*amount|total\s*paid|amount\s*paid|net\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi
+    /(receipt\s*amount|paid\s*amount|payment\s*amount)[^\d]{0,40}([\d,]+(?:\.\d{1,2})?)/gi,
+    /(grand\s*total|net\s*total|total\s*payable|net\s*payable|amount\s*due|final\s*amount)[^\d]{0,50}([\d,]+(?:\.\d{1,2})?)/gi,
+    /(total\s*amount|total\s*paid|amount\s*paid|net\s*amount|\btotal\b)[^\d]{0,24}([\d,]+(?:\.\d{1,2})?)/gi
   ];
 
   const hits = [];
